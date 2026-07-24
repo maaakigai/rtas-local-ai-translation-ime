@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Filter Include="Header Files">
+      <UniqueIdentifier>{93995380-89BD-4b04-88EB-625FBE52EBFB}</UniqueIdentifier>
+      <Extensions>h;hh;hpp;hxx;h++;hm;inl;inc;ipp;xsd</Extensions>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="rtas_factory.cpp" />
+    <ClCompile Include="rtas_registration.cpp" />
+    <ClCompile Include="rtas_preserved_guids.cpp" />
+    <ClCompile Include="rtas_text_service.cpp" />
+    <ClCompile Include="rtas_translation.cpp" />
+    <ClCompile Include="rtas_ui.cpp" />
+    <ClCompile Include="rtas_utils.cpp" />
+    <ClCompile Include="..\src\llm\ollama_client.cpp" />
+    <ClCompile Include="..\tools\mozc_bridge\main.cpp" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="rtas_factory.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rtas_registration.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rtas_text_service.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rtas_globals.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rtas_ui.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rtas_translation.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rtas_utils.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="..\tools\mozc_bridge\bridge_api.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="TsfIme.def" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="rtas_resources.rc" />
+  </ItemGroup>
+</Project>

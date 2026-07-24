@@ -1,0 +1,3 @@
+#include "..\\resource_ids.h"
+
+IDI_RTAS_ICON ICON "..\\Ime3\\rtas.ico"

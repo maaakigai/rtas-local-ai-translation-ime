@@ -1,0 +1,21 @@
+id	category	reading	committed_text	hint	notes
+short_001	short_word	ねこ			Common noun; compare top candidates and raw-reading fallback.
+short_002	short_word	きょう			Date/time-like common reading; candidate order matters.
+short_003	short_word	はし			Ambiguous homophone; compare candidate diversity.
+clause_001	clause	きょうは			Short clause with particle; compare segment boundary.
+clause_002	clause	かんじへんかん			Compound noun phrase; compare segmentation and candidates.
+particle_001	particle_sentence	わたしはりんごをたべる			Particle-heavy sentence; verify multi-segment behavior.
+particle_002	particle_sentence	これはてすとです			Mixed common words and katakana loanword target.
+proper_001	proper_noun	なかむらさん			Personal-name-like input; compare proper noun handling.
+proper_002	proper_noun	とうきょうえき			Place/station name; compare compound proper noun ranking.
+proper_003	proper_noun	ぷそにゅーじぇねしす			Game-title-like katakana phrase; compare unknown/proper handling.
+unknown_001	unknown	もずくねいてぃぶ			Project-specific unknown phrase; ensure graceful failure.
+unknown_002	unknown	あーるてぃーえーえす			Product acronym in kana; compare transliteration behavior.
+mixed_001	mixed_latin_number	RTASをつかう			Latin acronym plus Japanese particle/verb.
+mixed_002	mixed_latin_number	2026ねん5がつ19にち			Numbers plus date units; compare normalization choices.
+mixed_003	mixed_latin_number	ばーじょん2をためす			Katakana loanword plus number.
+long_001	long_sentence	きょうはいいてんきなのでさんぽにいきます			Longer sentence; compare latency and segment coherence.
+long_002	long_sentence	へんかんこうほをなんどもきりかえてかくにんする			Longer operational sentence; compare candidate stability.
+punct_001	punctuation	こんにちは、せかい			Delimiter case; verify punctuation does not corrupt segments.
+punct_002	punctuation	これはてすとです。よろしく			Sentence delimiter; compare clause handling.
+layer_001	layer_flow	きょうはいいてんきです	今日はいい天気です	translation	Use selected Layer1/Layer2 text as translation source.

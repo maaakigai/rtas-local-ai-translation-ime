@@ -1,0 +1,103 @@
+{
+  "schema_version": 1,
+  "purpose": "Manifest for RTAS Mozc native mozc_server_client evaluation. Do not treat this as a bundled artifact.",
+  "native_backend": "mozc_server_client",
+  "mozc_repository": "https://github.com/google/mozc",
+  "mozc_commit": "fea1ebace034ade31c611344793f559800e366c9",
+  "mozc_commit_observed_utc": "2026-06-12",
+  "mozc_commit_verification": "Verified from the Google Mozc GitHub Actions run and local detached checkout.",
+  "source_pin_policy": "The manifest commit is authoritative for comparison runs. Do not rely on a floating branch.",
+  "artifact": {
+    "kind": "github_actions_windows_msi",
+    "name": "Mozc64_x64.msi",
+    "location": "external:../rtas-artifacts/mozc/fea1ebace034ade31c611344793f559800e366c9/artifact_zip/Mozc64.msi",
+    "archive_location": "external:../rtas-artifacts/mozc/fea1ebace034ade31c611344793f559800e366c9/Mozc64_x64.msi.artifact.zip",
+    "archive_sha256": "4e18b4363fc264b2325c8545a08cfea6664e70773afe9b4afb4b0e61fe85cbca",
+    "archive_size": 24884594,
+    "msi_sha256": "a7d3113ee44fa096b7bc2cbafbcf7cb36ff444b2e62a84f7bdbb877acceb9fa9",
+    "msi_size": 26578944,
+    "github_actions": {
+      "workflow": "CI for Windows",
+      "run_id": 27324141219,
+      "artifact_id": 7555700414,
+      "artifact_name": "Mozc64_x64.msi",
+      "artifact_digest": "sha256:4e18b4363fc264b2325c8545a08cfea6664e70773afe9b4afb4b0e61fe85cbca",
+      "head_sha": "fea1ebace034ade31c611344793f559800e366c9",
+      "created_at_utc": "2026-06-11T04:34:57Z",
+      "expires_at_utc": "2026-09-09T04:37:19Z"
+    },
+    "administrative_extract": {
+      "method": "msiexec /a",
+      "root": "external:../rtas-artifacts/mozc/fea1ebace034ade31c611344793f559800e366c9/msi_admin_extract/PFiles/Mozc",
+      "log": "external:../rtas-artifacts/mozc/fea1ebace034ade31c611344793f559800e366c9/msi_admin_extract.log",
+      "mozc_server": "mozc_server.exe",
+      "mozc_server_sha256": "7ed659bb4ba7a6074a946fe7c5729df08e21fce5e15e15a6ef4af3bf60296a00",
+      "mozc_server_size": 22582272,
+      "credits_notice": "documents/credits_en.html",
+      "credits_notice_sha256": "dd7c566382204f448040095e5d3c2f2b5199a1b85d44f427ceb94277dc04af50"
+    },
+    "rtas_repository_policy": "Do not commit the MSI, extracted Mozc binaries, Mozc source checkout, or generated protocol output to RTAS without human/license review.",
+    "build_command": "python src/build_tools/update_deps.py; bazelisk build --config oss_windows --config release_build package",
+    "expected_output": "bazel-bin/win32/installer/Mozc64.msi"
+  },
+  "protocol_sources": [
+    "generated:src/protocol/commands.proto@fea1ebace034ade31c611344793f559800e366c9",
+    "generated:src/protocol/candidate_window.proto@fea1ebace034ade31c611344793f559800e366c9",
+    "oss-client:src/client/client.cc@fea1ebace034ade31c611344793f559800e366c9",
+    "oss-client:src/client/client_interface.h@fea1ebace034ade31c611344793f559800e366c9"
+  ],
+  "forbidden_protocol_sources": [
+    "Google Japanese Input private named pipe",
+    "hand-coded protobuf field numbers",
+    "byte walking copied from tools/mozc_bridge",
+    "unproven local Program Files probing"
+  ],
+  "license_notice_inputs": [
+    "LICENSE",
+    "AUTHORS",
+    "CONTRIBUTORS",
+    "VOCABULARY_POLICY.md",
+    "src/data/dictionary_oss/README.txt",
+    "PFiles/Mozc/documents/credits_en.html",
+    "Qt notices if Qt binaries are distributed",
+    "other binary dependency notices shipped with the artifact"
+  ],
+  "build_environment_to_record": {
+    "windows_version": "",
+    "architecture": "x64",
+    "visual_studio_version": "",
+    "msvc_toolset": "",
+    "windows_sdk": "",
+    "python_version": "",
+    "dotnet_version": "",
+    "bazelisk_version": "",
+    "bazel_version": "",
+    "system_locale": "",
+    "ui_language": "",
+    "code_page": "",
+    "windows_utf8_beta_setting": "",
+    "encoding_environment_variables": []
+  },
+  "human_confirmation_required_before": [
+    "system-wide Mozc MSI install",
+    "regsvr32 or IME registration",
+    "adding Mozc source, generated protocol output, build artifacts, or third_party directories to RTAS",
+    "redistributing a bundled Mozc artifact"
+  ],
+  "provider_compare_defaults": {
+    "backend": "native",
+    "transport": "native",
+    "effective_transport": "native",
+    "fallback_used": false,
+    "fallback_source": "",
+    "input_scope": "repo_corpus"
+  },
+  "open_validation_items": [
+    "official Mozc client wrapper build",
+    "session create/delete smoke test",
+    "candidate extraction through generated Mozc types",
+    "authoritative segment metadata availability",
+    "bridge baseline comparison",
+    "license/notices review before distribution"
+  ]
+}

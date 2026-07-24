@@ -1,0 +1,16 @@
+LIBRARY
+EXPORTS
+    ImeInquire
+    ImeConfigure
+    ImeConversionList
+    ImeDestroy
+    ImeEscape
+    ImeGetRegisterWordStyle
+    ImeGetIcon
+    ImeProcessKey
+    ImeSelect
+    ImeSetActiveContext
+    ImeSetCompositionString
+    ImeToAsciiEx
+    NotifyIME
+

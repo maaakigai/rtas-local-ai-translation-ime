@@ -1,0 +1,123 @@
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+*.obj
+*.exe
+*.pdb
+*.dll
+*.lib
+*.exp
+*.ilk
+*.sbr
+*.tlh
+*.tli
+*.tmp
+*.cache
+*.log
+
+*.user
+*.userosscache
+*.suo
+*.sdf
+*.db
+*.opendb
+*.VC.db
+*.VC.VC.opendb
+
+.vscode/
+
+.vs/
+*.ncb
+*.aps
+*.idb
+*.psess
+*.vsp
+*.vspscc
+
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+*.cmake
+build/
+
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# 大容量辞書
+dictionary/unidic-csj-202302_full/**
+# 翻訳モデル
+dictionary/translate/**/model.bin
+# 既知の大ファイル
+data/dictionary/morph_unidic.tsv
+# バックアップにある大容量辞書
+data/dictionary/backup/morph_dict_full.tsv
+# デバッグ出力の辞書データ
+Ime3/x64/Debug/data/dictionary/
+x64/Debug/data/dictionary/
+
+# Visual Studio build output directories (nested too)
+[Dd]ebug/
+[Rr]elease/
+[Xx]64/
+[Xx]86/
+[Aa][Rr][Mm]64/
+
+# MSBuild / VS intermediate artifacts
+*.tlog
+*.lastbuildstate
+*.recipe
+*.ipch
+*.pch
+*.VC.opendb
+*.VC.db-shm
+*.VC.db-wal
+*.vcxproj.FileListAbsolute.txt
+
+# Local workspace / developer-specific files
+*.code-workspace
+
+# Local scratch files
+tmp_*
+tmp_*/
+build.log
+
+# Local reference copies / personal documents
+Microsoft_IME_sample/
+卒研用/
+
+# Local generated preview artifacts
+pdf_contact_sheet.png
+pdf_pages_preview/
+temp_layout_check.pdf
+
+# --- RTAS/Mozc local artifacts ---
+# Keep tools/mozc_bridge source files tracked, ignore only build output.
+tools/mozc_bridge/**/[Dd]ebug/
+tools/mozc_bridge/**/[Rr]elease/
+tools/mozc_bridge/**/[Xx]64/
+tools/mozc_bridge/**/[Xx]86/
+tools/mozc_bridge/**/*.tlog
+tools/mozc_bridge/**/*.lastbuildstate
+tools/mozc_bridge/**/*.recipe
+tools/mozc_bridge/**/*.vcxproj.FileListAbsolute.txt
+
+# Local logs / scratch
+*.tmp.txt
+temp*.txt
+tmp_*.txt
+*.bak
+/keymap_capture_*.txt
+/pdf_unicode_escape.txt
+/restration.txt
+/Plan1.md
+/Ime3/*_back.h
+/data/logs/*.json
+/data/raw/
+/data/local-generated/
+/dictionary/translate/
+
+# SSH helper scripts with local credentials
+start_ssh_terminal.ps1
+start_ssh_tunnel_ollama.ps1

@@ -1,0 +1,78 @@
+{
+  "provider": {
+    "kana": {
+      "mode": "mozc",
+      "llm": {
+        "model": "default",
+        "host": "127.0.0.1",
+        "port": 11434,
+        "path": "/api/generate",
+        "use_tls": false,
+        "timeout_ms": 3000,
+        "keep_alive": -1,
+        "warmup_on_activate": true,
+        "warmup_timeout_ms": 60000,
+        "unload_on_deactivate": true,
+        "unload_delay_ms": 10000,
+        "log_timings": true
+      },
+      "dictionary": {
+        "enabled": false,
+        "morph_tsv": "data/dictionary/morph_dict.tsv",
+        "bilingual_tsv": "data/dictionary/jmdict.tsv",
+        "learning": {
+          "enable": false,
+          "profile_root": "data/user_learn/profiles"
+        }
+      },
+      "mozc": {
+        "enabled": true,
+        "transport": "imm32",
+        "timeout_ms": 1000,
+        "kana_kanji_only_mode": false
+      }
+    },
+    "translation": {
+      "mode": "llm",
+      "llm": {
+        "model": "default",
+        "host": "127.0.0.1",
+        "port": 11434,
+        "path": "/api/generate",
+        "use_tls": false,
+        "timeout_ms": 3000,
+        "keep_alive": -1,
+        "warmup_on_activate": true,
+        "warmup_timeout_ms": 60000,
+        "unload_on_deactivate": true,
+        "unload_delay_ms": 10000,
+        "log_timings": true
+      },
+      "dictionary": {
+        "enabled": false,
+        "morph_tsv": "data/dictionary/morph_dict.tsv",
+        "bilingual_tsv": "data/dictionary/jmdict.tsv",
+        "learning": {
+          "enable": false,
+          "profile_root": "data/user_learn/profiles"
+        }
+      }
+    },
+    "logging": {
+      "debug_file": {
+        "enabled": false,
+        "path": "logs/rtas-debug.log",
+        "max_bytes": 1048576
+      }
+    },
+    "runtime_limits": {
+      "max_preedit_chars": 512,
+      "max_romaji_buffer": 64,
+      "candidate_learning_enabled": false,
+      "translation_cache": {
+        "max_entries": 64,
+        "max_candidates_per_entry": 8
+      }
+    }
+  }
+}

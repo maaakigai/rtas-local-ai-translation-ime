@@ -1,0 +1,7 @@
+#pragma once
+
+#define IDI_RTAS_ICON 101
+#define IDI_RTAS_MODE_ON 102
+#define IDI_RTAS_MODE_OFF 103
+#define IDI_RTAS_ICON_IMM IDI_RTAS_ICON
+#define IDI_IME IDI_RTAS_ICON

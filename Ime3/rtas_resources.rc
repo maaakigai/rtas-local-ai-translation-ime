@@ -1,0 +1,5 @@
+#include "..\\resource_ids.h"
+
+IDI_RTAS_ICON ICON "rtas.ico"
+IDI_RTAS_MODE_ON ICON "rtas_mode_on.ico"
+IDI_RTAS_MODE_OFF ICON "rtas_mode_off.ico"

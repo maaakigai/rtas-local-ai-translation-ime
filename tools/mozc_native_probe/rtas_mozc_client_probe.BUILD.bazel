@@ -1,0 +1,19 @@
+load("//:build_defs.bzl", "mozc_cc_binary")
+
+package(default_visibility = ["//visibility:private"])
+
+mozc_cc_binary(
+    name = "rtas_mozc_client_probe",
+    srcs = ["rtas_mozc_client_probe.cc"],
+    tags = ["noandroid"],
+    deps = [
+        "//base:init_mozc",
+        "//client",
+        "//client:client_interface",
+        "//protocol:candidate_window_cc_proto",
+        "//protocol:commands_cc_proto",
+        "@com_google_absl//absl/flags:flag",
+        "@com_google_absl//absl/log",
+        "@com_google_absl//absl/time",
+    ],
+)

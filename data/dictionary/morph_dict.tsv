@@ -1,0 +1,11 @@
+surface	reading	base_form	pos	cost	features
+猫	ネコ	猫	名詞	100	source=portfolio-sample
+ねこ	ネコ	猫	名詞	200	source=portfolio-sample
+犬	イヌ	犬	名詞	100	source=portfolio-sample
+いぬ	イヌ	犬	名詞	200	source=portfolio-sample
+日本	ニホン	日本	名詞	100	source=portfolio-sample
+にほん	ニホン	日本	名詞	200	source=portfolio-sample
+今日	キョウ	今日	名詞	100	source=portfolio-sample
+きょう	キョウ	今日	名詞	200	source=portfolio-sample
+翻訳	ホンヤク	翻訳	名詞	100	source=portfolio-sample
+ほんやく	ホンヤク	翻訳	名詞	200	source=portfolio-sample

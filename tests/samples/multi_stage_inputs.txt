@@ -1,0 +1,21 @@
+﻿# Purpose: 多段変換プロトタイプの手動検証用サンプル。かな入力→漢字候補→英訳フローを想定。
+こんにちは|今日は|hello today
+おはよう|お早う|good morning
+ありがとう|有難う|thank you
+よろしく|宜しく|best regards
+すみません|済みません|excuse me
+しつれいします|失礼します|pardon me
+おつかれさま|お疲れ様|good job
+いただきます|頂きます|let's eat
+ごちそうさま|ご馳走様|thanks for the meal
+いってきます|行ってきます|i'm leaving
+ただいま|只今|i'm home
+おかえり|お帰り|welcome back
+いらっしゃいませ|いらっしゃいませ|welcome
+さようなら|左様なら|goodbye
+はじめまして|初めまして|nice to meet you
+がんばって|頑張って|good luck
+だいじょうぶ|大丈夫|it's ok
+しんぱいしないで|心配しないで|don't worry
+おめでとう|おめでとう|congratulations
+おだいじに|お大事に|get well soon
