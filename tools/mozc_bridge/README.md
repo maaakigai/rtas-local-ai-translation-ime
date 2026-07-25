@@ -7,7 +7,9 @@
   （`server`は後方互換エイリアス）からプロセス内で呼び出します。
 - `mozc_bridge.vcxproj`では、手動診断用のコンソール実行ファイルを生成します。
 
-公開スナップショットの既定値は`transport=imm32`であり、この経路は通常動作には使いません。
+応募用スナップショットの既定値は、オリジナルのかな漢字変換を維持するため
+`transport=bridge`です。通常動作ではDLLへ組み込んだ同じ実装をin-processで呼び出し、
+このコンソール版は手動診断にだけ使います。
 
 > [!WARNING]
 > この経路はGoogle日本語入力の非公開セッション境界へ依存します。安定した公開APIではなく、
@@ -44,7 +46,7 @@ cmd /c "echo ねこ|tools\mozc_bridge\x64\Release\mozc_bridge.exe"
 
 PowerShell のパイプは文字コードの影響で期待どおり動かないことがあるため、上記の `cmd /c` 形式を推奨します。
 
-## RTAS の研究用設定例
+## RTAS の既定設定
 
 `config/ime_settings.json` の例:
 

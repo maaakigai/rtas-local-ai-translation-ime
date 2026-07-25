@@ -98,9 +98,9 @@ Backend configuration matrix:
 
 | Backend record | Required config shape | Expected state |
 | --- | --- | --- |
-| `bridge` | `provider.kana.mode = "mozc"` and `provider.kana.mozc.transport = "bridge"` | Opt-in research baseline; the DLL calls the compiled-in bridge implementation. |
+| `bridge` | `provider.kana.mode = "mozc"` and `provider.kana.mozc.transport = "bridge"` | Public-snapshot default; the DLL calls the compiled-in bridge implementation. |
 | `server` | `provider.kana.mode = "mozc"` and `provider.kana.mozc.transport = "server"` | Legacy alias only; expected to behave as `bridge`. |
-| `imm32` | `provider.kana.mode = "mozc"` and `provider.kana.mozc.transport = "imm32"` | Public-snapshot default; segment metadata may be unavailable. |
+| `imm32` | `provider.kana.mode = "mozc"` and `provider.kana.mozc.transport = "imm32"` | Experimental comparison path; live testing returned no candidates on the submission machine. |
 | `dictionary` | `provider.kana.mode = "dictionary"` and dictionary assets enabled/resolved | Prototype backend; not Mozc parity. |
 | `native` | `provider.kana.mode = "mozc"`, `provider.kana.mozc.transport = "native"`, and `provider.kana.mozc.native.backend = "mozc_server_client"` | Opt-in app-local wrapper/server path; unavailable without explicit artifacts. |
 

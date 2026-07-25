@@ -66,8 +66,8 @@ public:
 
 ## Current implementation boundary
 
-The checked-in public default uses the IMM32 transport for Layer 1 and the LLM
-provider for Layer 2 and Translation. The bridge and native Mozc transports are
+The checked-in public default uses the bridge transport for Layer 1 and the LLM
+provider for Layer 2 and Translation. The IMM32 and native Mozc transports are
 opt-in research paths. Backend selection is handled by
 `src/provider/conversion_provider_factory.cpp`; UI code should not depend on a
 backend-specific executable or protocol.
