@@ -14,7 +14,7 @@
     "llmRequestId": 42,                 // 非同期処理の追跡ID
     "partial": false,                   // 語尾など一部分だけを対象とする場合はtrue
     "lang": "ja|en",                    // 必要に応じて付ける言語タグ
-    "commitMode": "replace|append",     // 適用方法（翻訳の既定値はreplace）
+    "commitMode": "replace|append",     // 候補側の適用指定。現行IME確定経路はreplace
     "timestamp": "ISO8601"              // 任意の作成日時
   }
 }
@@ -24,7 +24,7 @@
 
 - **layer1**：かな漢字変換バックエンドが生成します。通常、`commitText`は漢字を含む確定文字列で、`displayText`には番号などの表示用情報を含められます。
 - **layer2**：Layer 1へ戻って統合する言い換え・拡張候補です。末尾の語句だけを表す場合は`metadata.partial=true`を設定します。
-- **translation**：最終的な翻訳文を表します。設定で追記へ切り替えない限り日本語文を置換するため、`metadata.commitMode`の既定値は`replace`です。
+- **translation**：最終的な翻訳文を表します。`metadata.commitMode`は候補スキーマ上で`replace`／`append`を表現できますが、現行IMEの確定経路は`replace`だけを使用します。
 
 ## プロバイダー比較時の注意
 

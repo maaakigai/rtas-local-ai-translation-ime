@@ -2,10 +2,14 @@
 
 多段レイヤーで利用するLLMプロンプトを以下の方針で定義する。Layer1（かな→漢字）は選択したローカル変換プロバイダーで処理し、LLMはLayer2（言い換え）とLayer3（翻訳）で使用する。
 
+> この文書はプロンプトと候補スキーマの設計メモです。現在のキー操作と確定動作は
+> [`docs/state_machine.md`](../state_machine.md)を正とします。特に現行IMEの翻訳確定は
+> `replace`だけを使用し、`append`は候補スキーマ上の将来拡張です。
+
 ## 共通設計指針
 - 実行先は既定でローカルOllamaサーバー（`127.0.0.1:11434`）。モデル名はチェックイン済み設定の`default`エイリアスを使用する。
 - すべてのリクエストは JSON API `/api/generate` へ POST。`stream=false` でバッチ取得。
-- キャッシュキーは `layer + model + promptHash + temperature + commitMode`。Space キーはキャッシュ巡回のみ、Shift+Space 時に `bypass_cache=true` を渡して再問い合わせする。
+- キャッシュキーは `layer + model + promptHash + temperature + commitMode`。候補レイヤーからの再問い合わせでは`bypass_cache=true`を渡す。
 - 返却フォーマットはプレーンテキスト（制御トークンなし）。応答パーサで JSON 化し、`CandidateEntry` 配列へ変換する。
 
 ## Layer2: 言い換えテンプレート

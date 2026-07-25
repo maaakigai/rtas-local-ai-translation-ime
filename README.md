@@ -475,7 +475,7 @@ Start-Process regsvr32.exe -ArgumentList "/u `"$dll`"" -Wait
 - [開発プロセスとAI支援](DEVELOPMENT_PROCESS.md)
 - [公開範囲と注意事項](NOTICE.md)
 - [第三者通知](THIRD_PARTY_NOTICES.md)
-- [状態遷移](docs/state_machine.md)
+- [入力・候補選択フロー](docs/state_machine.md)
 - [候補スキーマ](docs/api/candidate_schema.md)
 - [変換プロバイダーAPI](docs/api/conversion_provider.md)
 - [プロバイダー切り替え](docs/operations/provider_switch.md)
