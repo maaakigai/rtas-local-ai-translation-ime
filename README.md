@@ -131,7 +131,8 @@ flowchart TD
 ### 実行環境
 
 - Windows 10 / 11 x64
-- [Google 日本語入力 Windows版](https://www.google.co.jp/ime/)
+- Windowsに登録された日本語IME
+  - Windows標準のMicrosoft IME、または[Google 日本語入力 Windows版](https://www.google.co.jp/ime/)など
 - [Ollama for Windows](https://docs.ollama.com/windows)
 - Ollamaモデル用の空き容量
   - `gemma3:4b`の場合は約3.3 GB
@@ -164,10 +165,12 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --source wing
   --override "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
 
-### 3. Google日本語入力を準備
+### 3. Windowsの日本語IMEを確認
 
-[Google 日本語入力](https://www.google.co.jp/ime/)をインストールし、単体で日本語変換が
-できることを確認します。RTASはこのローカル変換プロセスを利用します。
+Windows標準のMicrosoft IMEや[Google 日本語入力](https://www.google.co.jp/ime/)など、
+Windowsに登録された日本語IMEで単体の日本語変換ができることを確認します。
+既定の`transport=imm32`ではWindowsの公開IMM32 APIを利用するため、
+Google日本語入力は必須ではありません。Google日本語入力固有の`bridge`経路は実験用です。
 
 ### 4. Ollamaとモデルを準備
 
@@ -179,14 +182,18 @@ ollama pull gemma3:4b
 ollama cp gemma3:4b default
 ```
 
-APIとモデルを確認します。
+設定中の`default`はOllamaの予約語ではなく、ローカルに作成するモデルエイリアスです。
+上の例では`gemma3:4b`を`default`という名前で参照できるようにしています。
+これにより、RTASの設定を変更せず、Ollama側で実モデルを差し替えられます。
+
+OllamaのAPIと、`default`エイリアスが作成されたことを確認します。
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:11434/api/version
-Invoke-RestMethod http://127.0.0.1:11434/api/tags |
-  Select-Object -ExpandProperty models |
-  Select-Object name, size
+ollama list
 ```
+
+一覧に`default:latest`が表示されれば、既定モデルの準備は完了です。
 
 ### 5. Release x64をビルド
 
@@ -214,6 +221,10 @@ $msbuild = "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBui
 New-Item -ItemType Directory -Path .\x64\Release\config -Force | Out-Null
 Copy-Item .\config\ime_settings.json .\x64\Release\config\ime_settings.json -Force
 ```
+
+リポジトリ直下の`config\ime_settings.json`は配布元の設定です。
+実行時にRTASが読み込むのは、DLLと同じ出力ツリーへ配置した
+`x64\Release\config\ime_settings.json`です。元設定を変更した場合は、上のコピーを再実行してください。
 
 ### 7. RTASを登録
 
@@ -250,7 +261,8 @@ Start-Process regsvr32.exe -ArgumentList "`"$dll`"" -Wait
 
 ## 設定
 
-設定ファイルは[`config/ime_settings.json`](config/ime_settings.json)です。
+配布元の設定ファイルは[`config/ime_settings.json`](config/ime_settings.json)です。
+Releaseビルドの実行時には`x64\Release\config\ime_settings.json`を読み込みます。
 
 主要な既定値は次のとおりです。
 
@@ -264,11 +276,95 @@ provider.translation.llm.timeout_ms        = 3000
 provider.translation.llm.warmup_on_activate = true
 ```
 
+### Ollamaモデルを変更する
+
+#### 推奨：`default`エイリアスの実体を変更する
+
+別のモデルを使う場合は、そのモデルを取得して`default`エイリアスを作成します。
+RTASの設定変更や再ビルドは不要です。
+
+```powershell
+ollama pull llama3.1
+ollama cp llama3.1 default
+ollama list
+```
+
+変更後は入力対象のアプリでRTASをいったん無効化し、再度有効化してください。
+利用中だったモデルは無効化から10秒後に解放され、再有効化時に新しいモデルが読み込まれます。
+
+#### 設定ファイルでモデル名を直接指定する
+
+`x64\Release\config\ime_settings.json`の
+`provider.translation.llm.model`を、Ollamaに登録されているモデル名へ変更します。
+
+```json
+{
+  "provider": {
+    "translation": {
+      "llm": {
+        "model": "llama3.1"
+      }
+    }
+  }
+}
+```
+
+リポジトリ直下の`config\ime_settings.json`を編集した場合は、
+「実行時設定を配置」のコピーコマンドを再実行してください。
+
+#### 環境変数で一時的に上書きする
+
+環境変数は設定ファイルより優先されます。次の例では、そのPowerShellから起動した
+Notepad上のRTASだけが`llama3.1`を使用します。
+
+```powershell
+$env:IME3_OLLAMA_MODEL = "llama3.1"
+Start-Process notepad.exe
+```
+
 環境変数`IME3_OLLAMA_MODEL`、`IME3_OLLAMA_HOST`、`IME3_OLLAMA_PORT`を設定すると、
-設定ファイルより優先してOllamaのモデルと接続先を変更できます。
+モデルとOllamaの接続先を上書きできます。すでに起動しているアプリには反映されないため、
+設定後に入力対象のアプリを再起動してください。
 
 Docker版Ollamaも同じHTTP APIで利用できます。Windows版と同時に起動する場合は、
 ホストポートが競合しないように設定してください。
+
+## トラブルシューティング
+
+### `Win + Space`にRTASが表示されない
+
+- 管理者PowerShellで`Ime3.dll`を登録したか確認します。
+- 登録後にNotepadなどの入力対象アプリを再起動します。
+- 現在の主対象はx64アプリです。まずWindows標準のx64版Notepadで確認してください。
+
+### かな漢字候補が表示されない
+
+- Windowsの設定で日本語IMEが追加され、単体で変換できることを確認します。
+- `provider.kana.mozc.transport`が既定の`imm32`になっていることを確認します。
+- 設定変更後は入力対象のアプリを再起動します。
+
+### 言い換え・英訳候補が表示されない
+
+```powershell
+Invoke-RestMethod http://127.0.0.1:11434/api/version
+ollama list
+```
+
+- Ollamaが起動していることを確認します。
+- `ollama list`に、設定したモデルまたは`default:latest`があることを確認します。
+- `Shift + 半角/全角`でかな漢字変換専用モードになっていないことを確認します。
+- `provider.translation.mode`が`llm`になっていることを確認します。
+
+### 設定変更が反映されない
+
+- RTASが読むのは`x64\Release\config\ime_settings.json`です。
+- 環境変数`IME3_OLLAMA_MODEL`が残っていると、設定ファイルのモデル名より優先されます。
+- 設定変更後に入力対象のアプリを再起動します。
+
+### 初回のAI候補だけ時間がかかる
+
+初回はOllamaがモデルをメモリへ読み込むため時間がかかる場合があります。
+RTASは有効化時にモデルをウォームアップし、無効化から10秒後に解放します。
 
 ## テスト
 
@@ -326,7 +422,7 @@ RTAS
 
 - Windows x64を主な対象としています。
 - インストーラーと自動更新機能は未実装です。
-- Google日本語入力とOllamaの事前インストールが必要です。
+- Windowsに登録された日本語IMEとOllamaの事前インストールが必要です。
 - 初回翻訳はモデルのロードにより時間がかかる場合があります。
 - 既定のかな漢字変換経路はWindows IMM32 APIで、IMEごとの差異があります。
 - `bridge`経路とMozcネイティブバックエンドは調査・検証段階です。
