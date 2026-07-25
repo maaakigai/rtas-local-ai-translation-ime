@@ -1,41 +1,41 @@
-# Development process and AI assistance
+# 開発プロセスと生成AIの利用
 
-RTAS is an individual project. The author owns the engineering decisions and
-used Codex and other generative-AI tools as implementation assistants.
+RTASは個人開発作品です。技術上・製品上の判断は作者本人が行い、Codexなどの生成AIを
+実装支援ツールとして利用しました。
 
-The author was responsible for:
+作者本人が担当した内容は次のとおりです。
 
-- defining the problem and product direction;
-- deciding which AI proposals to accept, revise, or reject;
-- supplying follow-up requirements and constraints;
-- integrating changes and resolving conflicts between implementations;
-- building and testing on Windows;
-- verifying the TSF input flow, candidate UI, Google Japanese Input
-  compatibility experiments, and local Ollama integration on the development
-  machine; and
-- deciding what was ready to keep, publish, or describe as unfinished.
+- 解決する課題と製品の方向性の決定
+- AIから提示された案の採用・修正・棄却
+- 追加要件と制約の提示
+- 複数の実装案の統合と競合解消
+- Windows上でのビルドとテスト
+- TSF入力フロー、候補UI、Google日本語入力との互換性実験、
+  ローカルOllama連携の開発機上での確認
+- 完成機能として残す範囲、公開する範囲、未完成として説明する範囲の判断
 
-AI assistants were used to draft or revise portions of source code, tests,
-design notes, investigation plans, and portfolio documentation. Their output
-was not treated as authoritative: the author reviewed the changes, ran the
-build and tests, and issued additional instructions when behavior or design
-did not match the intended result.
+生成AIは、ソースコード、テスト、設計メモ、調査計画、ポートフォリオ文書の一部を
+新規作成・修正するために使用しました。AIの出力を正解としてそのまま採用したわけでは
+ありません。作者が差分を確認し、ビルドとテストを実行し、意図した動作や設計と
+一致しない場合は追加指示を出して修正しました。
 
-Branch names and old notes containing `codex` identify AI-assisted work, not a
-second human contributor. The public snapshot keeps this disclosure while
-removing temporary prompts, patch fragments, machine-specific captures, and
-obsolete planning files that are not part of the product or its evidence.
+ブランチ名や過去のメモに含まれる`codex`という表記は、AI支援を受けた作業を示すもので、
+別の人間の共同制作者を示すものではありません。公開スナップショットではこの説明を残しつつ、
+製品や開発根拠に含まれない一時プロンプト、パッチ断片、開発機固有のキャプチャ、
+古くなった計画ファイルを整理しています。
 
-## Current verification boundary
+## 現在の検証範囲
 
-On 2026-07-25, the author verified:
+2026年7月25日に、作者本人が次の項目を確認しました。
 
-- `Release|x64` solution build: success, zero warnings and zero errors;
-- unit-test project build: success; and
-- `Ime3Tests.exe`: exit code 0.
+- `Release|x64`ソリューションビルド：成功、警告0、エラー0
+- 単体テストプロジェクトのビルド：成功
+- `Ime3Tests.exe`：終了コード0
+- in-process bridgeのライブ変換テスト：成功
+- 実際のRTAS上でのかな漢字変換とローカルOllama連携：動作確認済み
 
-The unit tests cover settings parsing, dictionary loading, provider behavior,
-and the learning store. Automated tests do not prove end-to-end behavior inside
-every Windows application, a live local Ollama model, or every Google Japanese
-Input version. Those are integration and manual-test boundaries and are
-described as such in the README and `tests/manual/`.
+単体テストは、設定の解析、辞書の読み込み、プロバイダーの動作、
+学習ストアを対象としています。ただし、自動テストだけですべてのWindowsアプリ、
+すべてのGoogle日本語入力バージョン、実際のローカルOllamaモデルにおける
+エンドツーエンド動作を保証するものではありません。これらは統合テスト・手動テストの
+範囲として、READMEと`tests/manual/`に記載しています。

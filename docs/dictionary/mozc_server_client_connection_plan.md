@@ -1,271 +1,185 @@
-# Mozc Server/Client Connection Plan
+# Mozcサーバー／クライアント接続計画
 
-Date: 2026-06-12
-Scope: Phase 2 follow-up for proving the OSS Mozc `mozc_server_client`
-artifact, protocol, and client boundary before RTAS implements real native
-conversion. This document does not make `transport=native` the default and does
-not add a conversion engine.
+- 更新日：2026-06-12
+- 対象：RTASで実際のnative変換を実装する前に、OSS Mozcの`mozc_server_client`成果物、プロトコル、クライアント境界を確認するPhase 2の後続作業
 
-## Decision
+この文書によって`transport=native`を既定にしたり、変換エンジンを公開リポジトリへ同梱したりすることはありません。
 
-Use `mozc_server_client` as the first native spike boundary. Phase 3 keeps it
-opt-in, but moves past the fail-closed stub: RTAS can now call an explicitly
-configured app-local wrapper/server pair and surface candidate/error results
-through the existing provider boundary.
+## 判断
 
-The implementation unit is still not "bundle Mozc into RTAS". It is a pinned
-external Mozc artifact plus a small RTAS-side native transport that can:
+最初のnative技術検証には`mozc_server_client`を使います。Phase 3の経路は任意で有効化するままですが、単に失敗するstubからは進み、明示設定したアプリ内ラッパー／サーバーの組をRTASから呼び出し、既存のプロバイダー境界を通じて候補またはエラーを返せます。
 
-- discover the artifact from explicit config.
-- identify its Mozc source commit and build provenance.
-- call a typed Mozc client/session boundary through the app-local wrapper.
-- parse candidates and segment metadata from generated Mozc types.
-- report unavailable/error states without silent fallback.
-- feed `tools/provider_compare` records that can be compared against the
-  current bridge baseline.
+実装単位は「MozcをRTASへ同梱すること」ではありません。固定した外部Mozc成果物と、RTAS側の小さなnative transportを組み合わせ、次を行います。
 
-Mozc source checkout, dependency download, and build attempts were performed
-only under `../rtas-artifacts`. No MSI install or vendored `third_party` import
-is performed as part of this repo change.
+- 明示設定から成果物を見つける。
+- Mozcソースのコミットとビルドの由来を識別する。
+- アプリ内ラッパーを介して、型付きMozcクライアント／セッション境界を呼び出す。
+- 生成済みMozc型から候補と文節情報を解析する。
+- 暗黙の代替処理を行わず、利用不能・エラー状態を報告する。
+- `tools/provider_compare`へ、現在のBridge基準と比較できる結果を渡す。
 
-## Source Pin
+Mozcソースの取得、依存物のダウンロード、ビルドは`../rtas-artifacts`の下だけで実施しました。このリポジトリ変更では、MSIのインストールや`third_party`の取り込みを行いません。
 
-Selected source pin for the first artifact proof:
+## ソースの固定
 
-- repository: `https://github.com/google/mozc`
-- branch observed: `master`
-- GitHub Actions commit observed on 2026-06-12:
-  `fea1ebace034ade31c611344793f559800e366c9`
-- full candidate SHA:
-  `fea1ebace034ade31c611344793f559800e366c9`
+最初の成果物確認に使ったソース：
 
-The artifact build must record the full SHA from the local Mozc clone or CI
-job with `git rev-parse HEAD`. If that SHA differs from the value above, the
-manifest wins and the comparison run must record the manifest SHA.
+- リポジトリ：`https://github.com/google/mozc`
+- 確認ブランチ：`master`
+- 2026-06-12に確認したGitHub Actionsコミット：`fea1ebace034ade31c611344793f559800e366c9`
 
-Use GitHub `master` as the source of truth for the source pin. A Gitiles `HEAD`
-page may not reflect the same visible revision as GitHub `master`, so direct
-build and artifact provenance must come from the clone or GitHub Actions run
-used to create the artifact.
+成果物のビルド時には、ローカルcloneまたはCIジョブで`git rev-parse HEAD`を実行して完全なSHAを記録します。上記と異なる場合は成果物マニフェストを正とし、比較結果にもマニフェストのSHAを記録します。
 
-## Artifact Shape
+ソース固定の基準にはGitHubの`master`を使います。Gitilesの`HEAD`表示はGitHub `master`と同じrevisionを表示しない場合があるため、ビルド元のcloneまたはGitHub Actions実行を由来の根拠にします。
 
-Target Windows artifact:
+## 成果物の形
 
-- kind: external Mozc Windows build artifact.
-- primary package output: `bazel-bin/win32/installer/Mozc64.msi`.
-- build command: `bazelisk build --config oss_windows --config release_build package`.
-- source tree: pinned `google/mozc` checkout.
-- artifact location for RTAS evaluation: outside the RTAS source tree, referenced
-  by `provider.kana.mozc.native.root` and
-  `provider.kana.mozc.native.mozc_build_artifact`.
+対象とするWindows成果物：
 
-The first evaluated artifact came from GitHub Actions rather than a local MSI
-build:
+- 種別：リポジトリ外のMozc Windowsビルド成果物
+- 主なパッケージ出力：`bazel-bin/win32/installer/Mozc64.msi`
+- ビルドコマンド：`bazelisk build --config oss_windows --config release_build package`
+- ソース：固定した`google/mozc` checkout
+- RTASから参照する設定：`provider.kana.mozc.native.root`および`provider.kana.mozc.native.mozc_build_artifact`
 
-- workflow: `CI for Windows`
-- run id: `27324141219`
-- artifact id: `7555700414`
-- artifact name: `Mozc64_x64.msi`
-- archive digest:
-  `sha256:4e18b4363fc264b2325c8545a08cfea6664e70773afe9b4afb4b0e61fe85cbca`
-- artifact expiry: `2026-09-09T04:37:19Z`
+最初の評価では、ローカルMSIビルドではなく次のGitHub Actions成果物を使用しました。
 
-That is acceptable for evaluation because the manifest records the workflow
-run, source SHA, artifact id/name, digest, and retention risk.
+- ワークフロー：`CI for Windows`
+- 実行ID：`27324141219`
+- 成果物ID：`7555700414`
+- 成果物名：`Mozc64_x64.msi`
+- ダイジェスト：`sha256:4e18b4363fc264b2325c8545a08cfea6664e70773afe9b4afb4b0e61fe85cbca`
+- 失効日時：`2026-09-09T04:37:19Z`
 
-Do not commit `Mozc64.msi`, Mozc build output, Qt output, MSYS2, LLVM, Ninja, or
-Mozc `third_party` directories to RTAS without a separate human/license review.
+ワークフロー実行、ソースSHA、成果物ID／名前、ダイジェスト、保持期限をマニフェストへ記録しているため、評価用として利用できます。
 
-## Human Confirmation Boundaries
+`Mozc64.msi`、Mozcビルド出力、Qt出力、MSYS2、LLVM、Ninja、Mozcの`third_party`は、別途人手によるライセンス確認を行わずRTASへコミットしません。
 
-Return to the user before performing any of these actions:
+## 人による確認が必要な操作
 
-- running `build_tools/build_qt.py --release --confirm_license`, because the
-  license confirmation must be intentional.
-- installing `Mozc64.msi` or changing system-wide IME state.
-- adding Mozc source, generated protocol output, build artifacts, or any
-  `third_party` dependency tree to the RTAS repository.
-- deciding that RTAS may redistribute a bundled Mozc artifact.
+次の操作を行う前には、利用者へ確認します。
 
-Small documentation updates, harness templates, and local manifest validation
-do not require confirmation.
+- `build_tools/build_qt.py --release --confirm_license`の実行
+- `Mozc64.msi`のインストールまたはシステム全体のIME状態変更
+- Mozcソース、生成済みプロトコル、ビルド成果物、`third_party`依存ツリーのRTASリポジトリへの追加
+- Mozc成果物をRTASと再配布する判断
 
-## Build Environment Proof
+小規模な文書更新、比較テンプレート、ローカルマニフェストの検証は、この確認対象に含めません。
 
-The first artifact proof should record:
+## ビルド環境の記録
 
-- Windows version and architecture.
-- Visual Studio version and selected MSVC toolset.
-- Windows SDK version.
-- Python version.
-- .NET version.
-- Bazelisk/Bazel version.
-- Mozc source SHA.
-- whether the artifact came from a local build or GitHub Actions.
-- exact build command.
+成果物の確認では次を記録します。
 
-The official Windows build requirements currently include 64-bit Windows 10 or
-later, Visual Studio 2022 components, Windows 11 SDK, MSVC v143, ATL, Python
-3.12 or later, .NET 6 or later, and Bazelisk. Windows ARM64 build-from-ARM64 is
-not yet supported by the official document.
+- Windowsのバージョンとアーキテクチャ
+- Visual StudioとMSVC toolset
+- Windows SDK
+- Python
+- .NET
+- Bazelisk／Bazel
+- MozcソースSHA
+- ローカルビルドかGitHub Actions成果物か
+- 正確なビルドコマンド
 
-Locale risk must be treated as a validation item, not as a fixed workaround.
-Because Mozc build steps involve Python, MSYS2, Qt, and Windows tooling, record
-at least:
+公式Windowsビルド文書は、64ビットWindows 10以降、Visual Studio 2022の各コンポーネント、Windows 11 SDK、MSVC v143、ATL、Python 3.12以降、.NET 6以降、Bazeliskを要件としています。公式文書ではWindows ARM64環境上からのARM64ビルドは未対応です。
 
-- system locale.
-- user UI language.
-- active code page from `chcp`.
-- whether the Windows "Beta: Use Unicode UTF-8" setting is enabled.
-- whether `PYTHONUTF8` or other encoding-related environment variables were
-  set.
+localeは固定回避策ではなく、検証項目として扱います。少なくとも、システムlocale、表示言語、`chcp`のコードページ、Windowsの「ベータ：ワールドワイド言語サポートでUnicode UTF-8を使用」の状態、`PYTHONUTF8`などの環境変数を記録します。再現可能な失敗を確認するまでは、RTAS側へlocale回避策を固定実装しません。
 
-Do not add RTAS-side hardcoded locale workarounds until a reproducible build
-failure has been captured.
+現在のビルド状況：
 
-Current build status:
+- `python src/build_tools/update_deps.py`は完了しました。
+- Developer Modeまたは管理者のシンボリックリンク権限がない環境では、Bazelに`--nowindows_enable_symlinks --noenable_runfiles`が必要です。
+- Visual Studio InstallerからATL／MFCを追加しました。
+- `//rtas_probe:rtas_mozc_client_probe`と`//server:mozc_server`のビルドに成功しました。
+- ローカルビルドした`bazel-bin/server/mozc_server.exe`に対し、セッション作成、IME有効化、UTF-8ファイル経由の読み入力、変換、候補取得、preedit文節取得を確認しました。
+- 管理展開したMSI内の`mozc_server.exe`は、完全なインストール環境がない状態ではラッパーから接続できません。
 
-- `python src/build_tools/update_deps.py` completed.
-- Bazel requires `--nowindows_enable_symlinks --noenable_runfiles` in this
-  environment unless Windows Developer Mode or elevated symlink privileges are
-  enabled.
-- Visual Studio ATL/MFC components were added through an elevated Visual Studio
-  Installer run.
-- `//rtas_probe:rtas_mozc_client_probe` builds successfully.
-- `//server:mozc_server` builds successfully.
-- The wrapper proves session creation, IME-on, UTF-8 file reading input,
-  conversion, candidate extraction, and preedit segment extraction against the
-  locally built `bazel-bin/server/mozc_server.exe`.
-- The administratively extracted MSI `mozc_server.exe` remains unreachable
-  through the wrapper without a full install context.
+次は、評価コーパス全体を通す取得経路を作り、評価用ランタイムにローカルビルドしたサーバー、インストール済みMSI、別のパッケージ化されたサーバールートのどれを使うか判断します。
 
-The next client/session step should turn the app-local RTAS runtime into a
-corpus-driven capture path and then decide whether the evaluated runtime should
-use a locally built server artifact, a full installed MSI, or another packaged
-server root.
+## ライセンスと通知
 
-## License And Notices
+再配布を検討する前に、少なくとも次を収集します。
 
-The artifact proof must collect notices before redistribution is considered:
+- Mozc最上位の`LICENSE`
+- 成果物または文書に含まれるMozcの`AUTHORS`と`CONTRIBUTORS`
+- Mozc `src/third_party`配下の通知
+- `src/data/dictionary_oss/README.txt`
+- NAIST／IPAdicとICOT無保証条項を含む辞書通知
+- 沖縄辞書のパブリックドメイン通知
+- 成果物と共に配布するQtその他バイナリ依存物の通知
 
-- Mozc top-level `LICENSE`.
-- Mozc `AUTHORS` and `CONTRIBUTORS`, if included in the artifact or
-  documentation bundle.
-- notices under Mozc `src/third_party`.
-- `src/data/dictionary_oss/README.txt`.
-- dictionary notices for NAIST/IPAdic and ICOT no-warranty terms.
-- Okinawa Dictionary public-domain notice.
-- notices for Qt and any other binary dependency shipped with the artifact.
+Googleが作成したMozcコードはBSD 3-Clauseですが、リポジトリには第三者コードと複数の条件を持つ辞書データがあります。RTASのnative経路をGoogle日本語入力と表示したり、Googleの推奨を受けているように示したりしません。
 
-Google-written Mozc code is BSD 3-Clause, but the repository explicitly calls
-out third-party code and mixed dictionary data. RTAS must not brand the native
-backend as Google Japanese Input and must not imply Google endorsement.
+この文書は技術チェックリストであり、法的助言ではありません。MozcバイナリをRTASへ同梱する前には、人によるライセンス確認が必要です。
 
-This document is an engineering checklist, not legal advice. A human/legal
-review is required before bundling Mozc binaries with RTAS releases.
+## 利用できるプロトコル境界
 
-## Acceptable Protocol Boundary
-
-Acceptable `protocol_source` values for provider comparison records:
+比較結果の`protocol_source`に記録できる値：
 
 - `generated:src/protocol/commands.proto@<mozc_commit>`
 - `generated:src/protocol/candidate_window.proto@<mozc_commit>`
 - `oss-client:src/client/client.cc@<mozc_commit>`
 - `oss-client:src/client/client_interface.h@<mozc_commit>`
-- a thin wrapper that uses Mozc generated proto/client types from the pinned
-  source tree.
+- 固定したソースツリーのMozc生成済みproto／client型を利用する薄いラッパー
 
-Rejected protocol boundaries:
+利用しない境界：
 
-- Google Japanese Input private named pipe.
-- copied byte-walking logic from `tools/mozc_bridge`.
-- hand-coded protobuf field numbers.
-- raw local `Program Files` probing without artifact provenance.
+- Google日本語入力の非公開named pipe
+- `tools/mozc_bridge`からコピーしたバイト走査
+- protobufフィールド番号の手書き
+- 成果物の由来を示さない`Program Files`の探索
 
-The official Mozc `commands.proto` describes protocol messages used for Mozc
-client/server communication. `candidate_window.proto` defines candidate words,
-candidate lists, and candidate window data used by the client/server and
-renderer. RTAS should consume generated types from those definitions rather
-than reimplementing wire fields.
+`commands.proto`にはMozcクライアント／サーバー間のメッセージ、`candidate_window.proto`には候補語、候補一覧、候補ウィンドウのデータが定義されています。RTASはwireフィールドを再実装せず、これらから生成した型を利用します。
 
-Concrete generated fields to prove in the spike:
+確認対象となる主な生成済みフィールド：
 
-- `commands.Input.CREATE_SESSION` and `commands.Input.DELETE_SESSION` provide
-  the session lifecycle commands.
-- `commands.Input.SEND_KEY` and `commands.Input.SEND_COMMAND` provide the
-  normal key/session command path.
-- `commands.KeyEvent.TEXT_INPUT`, `commands.KeyEvent.SPACE`, and
-  `commands.KeyEvent.HENKAN` are candidate input/conversion triggers to test
-  against the corpus.
-- `commands.SessionCommand.TURN_ON_IME` can put the session into a non-direct
-  composition mode before conversion.
-- `commands.Output.preedit` exposes `Preedit.Segment` records. In conversion
-  status, the proto comments state those segments represent conversion
-  segments.
-- `commands.Output.candidate_window` exposes `CandidateWindow.Candidate.value`
-  records for the active candidate window.
-- `commands.Output.all_candidate_words` exposes flattened `CandidateList`
-  records when populated by the server.
+- `commands.Input.CREATE_SESSION`／`DELETE_SESSION`：セッションの作成・削除
+- `commands.Input.SEND_KEY`／`SEND_COMMAND`：通常のキー／セッションコマンド
+- `commands.KeyEvent.TEXT_INPUT`／`SPACE`／`HENKAN`：入力・変換の開始
+- `commands.SessionCommand.TURN_ON_IME`：変換前に直接入力以外のモードへ切り替える
+- `commands.Output.preedit`：変換時の`Preedit.Segment`
+- `commands.Output.candidate_window`：現在の候補ウィンドウにある`CandidateWindow.Candidate.value`
+- `commands.Output.all_candidate_words`：サーバーが設定した場合の平坦化済み`CandidateList`
 
-This proves that the OSS protocol has typed places to read candidates and
-conversion segments. It does not prove that every RTAS corpus row will populate
-all of those fields. The Phase 2 smoke/probe must still measure which fields
-are actually returned by the chosen Windows artifact.
+型付きの候補・文節格納先があることと、すべてのテスト入力で値が設定されることは別です。選択したWindows成果物を使い、評価コーパス上で実際に返るフィールドを測定します。
 
-## Session Lifecycle
+## セッションのライフサイクル
 
-The implementation spike should use this lifecycle:
+技術検証では次の順序を使います。
 
-1. Discover the native root and artifact from typed config.
-2. Verify the manifest exists and matches `mozc_commit`.
-3. Locate a typed client wrapper or Mozc client binary compiled from that
-   source tree.
-4. Start or attach to Mozc server through the OSS client boundary.
-5. Create a session.
-6. Set IME on and a kana composition mode through generated command types.
-7. Feed the corpus `reading` using generated key/session command types.
-8. Trigger conversion.
-9. Parse candidates and segment metadata from generated output structures.
-10. Record latency, error state, fallback state, protocol source, commit, and
-    artifact provenance in provider comparison JSONL.
-11. Delete or clear the session.
-12. Terminate the server only if RTAS started it for this run.
+1. 型付き設定からnativeルートと成果物を解決する。
+2. マニフェストの存在と`mozc_commit`の一致を確認する。
+3. 同じソースからビルドした型付きクライアントラッパーまたはMozcクライアントバイナリを見つける。
+4. OSSクライアント境界からMozcサーバーを起動または接続する。
+5. セッションを作成する。
+6. 生成済みコマンド型でIMEを有効にし、かな入力モードを設定する。
+7. 生成済みキー／セッションコマンドでコーパスの`reading`を入力する。
+8. 変換を開始する。
+9. 生成済み出力構造から候補と文節情報を解析する。
+10. 遅延、エラー、代替処理、プロトコル、コミット、成果物の由来を比較JSONLへ記録する。
+11. セッションを削除または初期化する。
+12. RTASがこの実行のために起動したサーバーだけを終了する。
 
-The native transport should keep `fallback_policy=none` for the first proof.
-If a later explicit fallback test is added, the result must set
-`fallback_used=true` and name `fallback_source`.
+最初の確認では`fallback_policy=none`を維持します。後で明示的な代替処理テストを追加する場合は、`fallback_used=true`と`fallback_source`を記録します。
 
-## Candidate And Segment Proof
+## 候補と文節の確認
 
-Candidate availability is expected to be provable through generated Mozc output
-types:
+候補は、主に次の生成済みMozc出力型から取得します。
 
-- `commands.Output.candidate_window`, if the active candidate window is
-  populated.
-- `commands.CandidateWindow.Candidate.value`.
-- `commands.CandidateList` or `CandidateWord` fields where the selected client
-  boundary exposes them.
+- `commands.Output.candidate_window`
+- `commands.CandidateWindow.Candidate.value`
+- 選択したクライアント境界が公開する`commands.CandidateList`または`CandidateWord`
 
-Segment availability has a typed protocol path through
-`commands.Output.preedit.Segment`, but RTAS must not accept it as available for
-the native backend until a smoke run shows those fields are populated for the
-conversion command sequence. Candidate rows should record one of:
+文節には`commands.Output.preedit.Segment`という型付き経路がありますが、実際の変換コマンド列で値が返ることを簡易検証するまでは、利用可能とみなしません。
 
-- `segment_source=preedit`, when generated output contains authoritative
-  preedit/conversion segments.
-- `segment_source=candidate_list`, when segment spans are explicitly present in
-  the chosen generated structures.
-- `segment_source=unavailable`, when the server/client boundary cannot provide
-  authoritative segment metadata.
+結果には次のいずれかを記録します。
 
-Do not infer segment spans from particles, delimiters, cursor position, or
-candidate string differences as final native behavior. Heuristic reconstruction
-is allowed only as a rejected experiment and must not satisfy the default gate.
+- `segment_source=preedit`：正式なpreedit／変換文節が返った。
+- `segment_source=candidate_list`：選択した生成済み構造に文節範囲が明記された。
+- `segment_source=unavailable`：正式な文節情報を取得できない。
 
-## Provider Comparison Integration
+助詞、区切り文字、カーソル位置、候補文字列の差分から文節を推測した結果を、nativeの正式動作として扱いません。
 
-Native spike records must include:
+## 比較結果の形式
 
 ```json
 {
@@ -282,50 +196,40 @@ Native spike records must include:
 }
 ```
 
-The path above is an example manifest path, not a checked-in artifact path.
-Actual result files should identify the real local cache path, release asset,
-or GitHub Actions artifact id used for the run.
+上記パスはマニフェストの例であり、リポジトリ内の成果物パスではありません。実結果には、使用したローカルキャッシュ、release asset、またはGitHub Actions成果物IDを記録します。
 
-## Minimal Implementation Plan
+## 最小実装計画
 
-1. Completed: keep `transport=native` opt-in and fail closed when artifacts are
-   missing.
-2. Add an artifact manifest file for the selected Mozc commit.
-3. Completed: add a native probe that can load the manifest and verify the
-   artifact exists without starting conversion.
-4. Completed: download the pinned GitHub Actions artifact externally, extract
-   the MSI administratively, verify `mozc_server.exe`, and record a
-   server-start smoke fixture.
-5. Completed for the local build path: build the official client/session
-   wrapper and create a real Mozc session through generated protocol types.
-6. In progress: call the wrapper from RTAS native transport when explicit
-   `native.wrapper_exe` and `native.server_exe` paths are configured.
-7. Add corpus-driven candidate capture through the wrapper and record whether
-   candidate and segment fields stay populated across the evaluation corpus.
-8. Compare against `bridge` baseline before any default change is discussed.
+1. 完了：`transport=native`を任意有効のままにし、成果物不足時にはエラーを返す。
+2. 選択したMozcコミットの成果物マニフェストを追加する。
+3. 完了：マニフェストを読み込み、変換を開始せず成果物の存在を検証するツールを追加する。
+4. 完了：固定したGitHub Actions成果物を外部へ取得し、MSIを管理展開して`mozc_server.exe`を確認し、起動結果を記録する。
+5. ローカルビルド経路で完了：公式クライアント／セッションラッパーをビルドし、生成済み型を使って実セッションを作る。
+6. 実装済み：`native.wrapper_exe`と`native.server_exe`を明示した場合にRTASからラッパーを呼ぶ。
+7. 進行中：評価コーパス全体の候補取得を追加し、候補・文節フィールドが継続して返るか記録する。
+8. 既定値の議論前にBridge基準と比較する。
 
-The current probe and reviewed fixtures are documented in:
+関連文書・テストデータ：
 
 - `tools/mozc_native_probe/README.md`
 - `docs/dictionary/mozc_native_artifact_protocol_smoke.md`
 - `tests/samples/provider_comparison/native_artifact_unavailable_smoke.jsonl`
 - `tests/samples/provider_comparison/native_artifact_server_start_smoke.jsonl`
 
-## Default Gate
+## 既定化の条件
 
-`transport=native` remains non-default until all of these are true:
+次をすべて満たすまで、`transport=native`は既定にしません。
 
-- Mozc source commit and artifact provenance are pinned in a manifest.
-- required notices are collected and reviewed.
-- a protocol smoke test creates and deletes a real Mozc session.
-- candidate extraction is recorded through generated Mozc types.
-- segment metadata is either authoritative or explicitly unavailable.
-- provider comparison records validate for `bridge`, `server`, `imm32`,
-  `dictionary`, and `native`.
-- top-N candidate quality and latency are reviewed against bridge baseline.
-- fallback is disabled by default and explicit when tested.
+- Mozcソースと成果物の由来をマニフェストへ固定した。
+- 必要な通知を収集・確認した。
+- プロトコル簡易検証で実Mozcセッションを作成・削除した。
+- 生成済みMozc型から候補を取得・記録した。
+- 文節情報が正式な値であるか、取得不能と明示されている。
+- `bridge`、`server`、`imm32`、`dictionary`、`native`の比較記録を検証できる。
+- 上位N件の候補品質と遅延をBridge基準と比較した。
+- 代替処理が既定で無効で、試験時には明示される。
 
-## References
+## 参考資料
 
 - https://github.com/google/mozc
 - https://raw.githubusercontent.com/google/mozc/master/docs/build_mozc_in_windows.md

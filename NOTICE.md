@@ -1,25 +1,26 @@
-# Notices
+# 注意事項
 
-RTAS is a research prototype and portfolio artifact, not a supported product.
+RTASは研究用プロトタイプ兼ポートフォリオ作品であり、継続的なサポートを提供する
+製品ではありません。
 
-- Google Japanese Input and Ollama are installed separately and are not
-  redistributed by this repository.
-- The default public configuration uses the documented Windows IMM32 API for
-  compatibility with an installed Japanese IME.
-- The optional `bridge` transport is an experimental investigation of
-  implementation details that are not a stable or public Google API. It may
-  stop working after an update and is not recommended for production or
-  redistribution without an independent terms and legal review. Users should
-  review the current terms for their locale rather than treating this notice as
-  legal clearance: https://policies.google.com/terms
-- The repository does not contain an Ollama model, Google executable, Mozc
-  binary, full UniDic/JMdict corpus, or converted OPUS-MT model.
-- The small TSV files under `data/dictionary/` are contributor-authored sample
-  data for demonstrating the provider boundary; they are not extracted
-  dictionary corpora.
-- Input can be sent to a non-loopback Ollama-compatible endpoint if the user
-  explicitly changes the host setting or environment variables. The default
-  checked-in configuration is `127.0.0.1`.
+- Google日本語入力とOllamaは利用者が別途インストールする外部ソフトウェアであり、
+  このリポジトリでは再配布していません。
+- オリジナルのかな漢字変換を維持するため、公開設定の既定値は
+  `transport=bridge`です。この経路はGoogle日本語入力の安定した公開APIではなく、
+  非公開の実装詳細を調査して接続する互換性実験です。
+- `bridge`はGoogle日本語入力の更新で動作しなくなる可能性があります。製品利用や
+  再配布を検討する場合は、利用者自身が最新の利用条件と法的条件を確認してください。
+  この文書は利用許諾や法的判断を与えるものではありません。
+  現在のGoogle利用規約：https://policies.google.com/terms
+- 実験用の`transport=imm32`は、この提出環境ではかな漢字候補を返さなかったため、
+  既定経路として使用していません。
+- このリポジトリには、Ollamaモデル、Googleの実行ファイル、Mozcバイナリ、
+  UniDic／JMdictの完全なコーパス、変換済みOPUS-MTモデルを含めていません。
+- `data/dictionary/`内の小規模なTSVは、プロバイダー境界を説明するために
+  作者が作成したサンプルデータです。外部辞書コーパスから抽出したものではありません。
+- ホスト設定または環境変数を利用者が明示的に変更した場合、入力内容は
+  ループバック以外のOllama互換エンドポイントへ送信される可能性があります。
+  リポジトリに含まれる既定設定は`127.0.0.1`です。
 
-See `DEVELOPMENT_PROCESS.md` for the use of AI coding assistants and
-`THIRD_PARTY_NOTICES.md` for bundled third-party source.
+生成AIを利用した開発プロセスは`DEVELOPMENT_PROCESS.md`、同梱する第三者ソースは
+`THIRD_PARTY_NOTICES.md`を参照してください。

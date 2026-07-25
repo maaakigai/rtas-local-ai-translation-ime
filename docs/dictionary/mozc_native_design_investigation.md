@@ -1,68 +1,43 @@
-# Mozc Native Design Investigation
+# Mozcネイティブ方式の設計調査
 
-Date: 2026-05-19
-Scope: design investigation and migration status for Mozc native work. This
-document records the architectural direction and the Phase 1 typed transport
-state; it does not describe a completed native conversion engine.
+- 作成日：2026-05-19
+- 対象：Mozcネイティブ方式の設計方針と移行状況
 
-> Historical decision record: the recommendation below predates the
-> 2026-07-25 public snapshot work. A temporary hardening change selected
-> `transport=imm32`, but live testing returned no candidates. The current
-> checked-in default restores `transport=bridge`. Later Phase 3 work implemented
-> an opt-in app-local wrapper/server boundary for `native`; the public repository
-> does not bundle the external Mozc build artifacts it needs.
+この文書は、アーキテクチャの方向性と型付きtransport設定、任意で有効化するネイティブ経路の検証状況を記録します。完成したネイティブ変換エンジンの説明ではありません。
 
-## Executive Decision
+> 履歴上の注意：2026-07-25に、公開版の既定値を一時的に`transport=imm32`へ変更しましたが、実環境で候補を取得できませんでした。現在の既定値は`transport=bridge`へ戻しています。その後、Phase 3として、明示的に設定したアプリ内ラッパー／サーバーを呼び出す`native`経路を実装しました。ただし、必要な外部Mozc成果物は公開リポジトリに同梱していません。
 
-RTAS should not replace the current bridge path with a direct internal
-dictionary switch yet. The recommended direction is to keep the existing
-`bridge` and `imm32` paths available, then add a future opt-in
-`transport=native` path as a first-class Mozc backend.
+## 結論
 
-For this project, "native" must mean one of these principled integrations:
+現時点で、Bridge方式を内製辞書へ直接置き換えるべきではありません。`bridge`と`imm32`を選択可能な状態で維持し、将来の`transport=native`を独立したMozcバックエンドとして任意で有効化する方針です。
 
-1. RTAS links to or embeds an OSS Mozc conversion component and uses its typed
-   data structures directly.
-2. RTAS talks to an OSS Mozc server/client boundary using generated Mozc
-   protocol definitions, not hand-written numeric field parsing.
-3. RTAS improves its internal dictionary decoder separately, but does not call
-   that work "Mozc native" until it reaches a comparable decoder model,
-   segment model, and ranking model.
+このプロジェクトで「native」と呼べるのは、次のいずれかです。
 
-It must not mean moving the current Google Japanese Input pipe scraping and
-hardcoded protocol fields from `mozc_bridge.exe` into the RTAS DLL.
+1. OSS Mozcの変換部品をRTASへリンクまたは埋め込み、型付きデータ構造を直接利用する。
+2. 手書きの数値フィールド解析ではなく、生成済みMozcプロトコル定義を使ってOSS Mozcのサーバー／クライアント境界と通信する。
+3. 内製辞書デコーダーは別系統として改善し、同等のデコーダー、文節モデル、ランキングモデルへ到達するまでは「Mozc native」と呼ばない。
 
-## Non-Negotiable Constraints
+現在の`mozc_bridge.exe`にあるGoogle日本語入力の非公開pipe解析や固定プロトコルをRTAS DLLへ移すことは、native化に含めません。
 
-- No hardcoded install paths, pipe names, KLIDs, timeout constants, or protocol
-  field numbers in the native design.
-- No private Google Japanese Input named-pipe dependency in the native design.
-- No candidate UI or TextService special cases for `native`; the existing
-  `IConversionProvider` and `IMozcTransport` boundaries should absorb it.
-- No silent fallback from native to IMM32 unless an explicit config setting
-  allows that fallback and reports it.
-- No heuristic segment reconstruction as final behavior. Native should return
-  authoritative segment spans and surfaces from the converter.
-- No symptomatic candidate reordering or UI-label filtering as a substitute for
-  a real decoder/ranker.
-- Any fallback, discovery path, or scoring parameter must be explicit,
-  validated, testable, and documented.
+## 必須条件
 
-## Current Architecture
+- インストールパス、pipe名、KLID、タイムアウト、プロトコルフィールド番号をnative設計へ固定値として埋め込みません。
+- Google日本語入力の非公開named pipeへ依存しません。
+- `native`専用の候補UIやTextService分岐を追加せず、既存の`IConversionProvider`と`IMozcTransport`で吸収します。
+- 設定で許可し、利用した事実を報告しない限り、nativeからIMM32へ暗黙に切り替えません。
+- 正式な動作として、規則による文節の推測を使いません。変換器が返す文節範囲と表層形を利用します。
+- 本来のデコーダー／ランカーの代わりに、候補の並べ替えやUIラベル除去で症状だけを隠しません。
+- 代替処理、探索パス、スコア設定は、明示・検証・テスト・文書化できる形にします。
 
-### Provider Boundary
+## 現在の構成
 
-The stable RTAS provider interface is `IConversionProvider` in
-`src/api/conversion_provider.h`. Providers receive `LayerRequestContext` and
-return `CandidateList` with entries, optional segment metadata, optional async
-request id, pending state, layer id, and error text.
+### プロバイダー境界
 
-`Ime3/rtas_text_service.h` keeps the UI mostly provider-agnostic. It creates a
-provider through `CreateConversionProvider`, stores capabilities, sends
-Layer1/Layer2/Translation requests, and consumes returned strings and segment
-metadata. This boundary is the right place to keep future native work isolated.
+安定した入口は`src/api/conversion_provider.h`の`IConversionProvider`です。プロバイダーは`LayerRequestContext`を受け取り、候補、任意の文節情報、任意の非同期要求ID、処理中状態、レイヤーID、エラー文を含む`CandidateList`を返します。
 
-Important integration points:
+`Ime3/rtas_text_service.h`は、`CreateConversionProvider`でプロバイダーを生成し、対応機能を確認してLayer 1／Layer 2／Translationの要求を送り、返された文字列と文節情報を利用します。UIをバックエンドから分離するこの境界に、native固有処理を閉じ込めます。
+
+主要な接続点：
 
 - `src/api/conversion_provider.h`
 - `src/provider/conversion_provider_factory.cpp`
@@ -71,93 +46,63 @@ Important integration points:
 - `docs/state_machine.md`
 - `docs/ui_spec.md`
 
-### Config And Factory Selection
+### 設定と生成処理
 
-The current public config restores the bridge path:
+現在の公開設定：
 
-- `config/ime_settings.json`
-  - `provider.kana.mode = "mozc"`
-  - `provider.kana.mozc.transport = "bridge"`
+- `provider.kana.mode = "mozc"`
+- `provider.kana.mozc.transport = "bridge"`
 
-The bridge implementation is compiled into the RTAS DLL and is also buildable
-as a standalone diagnostic executable. It remains a private compatibility
-boundary rather than a stable public API.
+`src/config/provider_settings.*`はJSON上の文字列を、次の型付き値へ変換します。
 
-`src/config/provider_settings.*` keeps the serialized JSON `transport` value as
-a string, but parses it into a typed `MozcTransport` domain:
+- `bridge` → `MozcTransport::kBridge`
+- `server` → 互換性のため`MozcTransport::kBridge`として扱う旧別名
+- `imm32` → `MozcTransport::kImm32`
+- `native` → 明示設定したラッパーとMozcサーバーが存在する場合だけ初期化する、アプリ内配置のサーバー／クライアント境界
+- 未対応の文字列 → 設定エラー付きの`MozcTransport::kInvalid`
 
-- `bridge` -> `MozcTransport::kBridge`
-- `server` -> `MozcTransport::kBridge` as a legacy alias.
-- `imm32` -> `MozcTransport::kImm32`
-- `native` -> `MozcTransport::kNative` as an opt-in app-local server/client
-  boundary. It initializes only when the configured wrapper and Mozc server
-  artifacts exist.
-- unsupported strings -> `MozcTransport::kInvalid` with a configuration error.
+`src/provider/conversion_provider_factory.cpp`は、概ね次の順で選択します。
 
-The factory in `src/provider/conversion_provider_factory.cpp` currently
-chooses:
+1. `kana.mode`が`dictionary`で初期化に成功した場合、辞書プロバイダー
+2. `kana.mode`が`mozc`で初期化に成功した場合、Mozcプロバイダー
+3. IMM32プロバイダー
 
-1. dictionary provider, if kana mode is `dictionary` and initialization
-   succeeds.
-2. Mozc provider, if kana mode is `mozc` and initialization succeeds.
-3. IMM32 provider fallback.
+ただし`transport=native`では、設定した成果物が不足または不正な場合、IMM32へ暗黙に切り替えず、理由を示す利用不能プロバイダーを返します。不正なtransport名も可視の設定エラーとして扱います。
 
-For `transport=native`, the factory uses the app-local wrapper/server transport
-when its explicit artifacts validate. If they are missing or invalid, the
-factory returns an unavailable provider with a clear diagnostic instead of
-falling through to IMM32. Invalid transport strings likewise remain visible
-configuration errors instead of silently falling back to `imm32`, `bridge`, or
-`llm`.
+### Mozcプロバイダー
 
-### Mozc Provider And RTAS Bridge Transport
+`src/provider/mozc_conversion_provider.cpp`はLayer 1を`IMozcTransport`へ委譲し、`MozcCandidateResponse.segments`を`CandidateList.segments`へコピーして、文字列候補をLayer 1エントリへ変換します。
 
-`src/provider/mozc_conversion_provider.cpp` delegates Layer1 to
-`IMozcTransport`. It copies `MozcCandidateResponse.segments` into
-`CandidateList.segments` and converts candidate strings into Layer1 entries.
-
-`src/provider/mozc_transport.cpp` currently provides:
+`src/provider/mozc_transport.cpp`が提供する主な経路：
 
 - `MozcBridgeTransport`
-  - calls the bridge implementation compiled into the RTAS DLL.
-  - returns candidates and optional segment metadata directly to the provider.
-  - shares its implementation with the standalone diagnostic CLI, but does not
-    launch that CLI during normal RTAS conversion.
+  - RTAS DLLへ組み込んだBridge実装を呼び出します。
+  - 候補と、利用可能な場合は文節情報を直接返します。
+  - 診断用CLIと実装を共有しますが、通常変換時にCLIプロセスを起動しません。
 - `MozcImm32Transport`
-  - calls `ImmGetConversionListW(..., GCL_CONVERSION)`.
-  - returns candidates only.
-  - does not return segment metadata.
+  - `ImmGetConversionListW(..., GCL_CONVERSION)`を呼びます。
+  - 候補だけを返し、文節情報は返しません。
+- native用のアプリ内ラッパー／サーバーtransport
+  - 設定した外部成果物が検証できた場合だけ初期化します。
+  - 読みを一時UTF-8ファイルで渡し、ラッパーのJSON出力から候補と文節を読み取ります。
 
-There is no automatic fallback from a failed `MozcBridgeTransport` call to
-`MozcImm32Transport` inside `MozcConversionProvider`.
+`MozcConversionProvider`内では、Bridge失敗時にIMM32へ自動で切り替えません。
 
-### `mozc_bridge.exe`
+### Bridge実装の技術的負債
 
-`tools/mozc_bridge/main.cpp` is more than a simple IMM32 bridge. Its preferred
-path is:
+`tools/mozc_bridge/main.cpp`の元実装は、単純なIMM32ブリッジではありませんでした。
 
-1. Enumerate Google Japanese Input session pipes matching
-   `\\.\pipe\googlejapaneseinput.*.session`.
-2. Launch `GoogleIMEJaConverter.exe` from a hardcoded Program Files path when no
-   pipe is found.
-3. Send hand-built binary messages with hardcoded Mozc/Google protocol field
-   numbers.
-4. Parse candidate and segment data by walking protobuf-like wire fields.
-5. Fall back to IMM32 if the pipe path produces no candidates.
+1. `\\.\pipe\googlejapaneseinput.*.session`に一致するGoogle日本語入力のセッションpipeを列挙する。
+2. 見つからない場合、固定した`Program Files`パスから`GoogleIMEJaConverter.exe`を起動する。
+3. 固定したMozc／Googleプロトコル番号を使い、バイナリメッセージを組み立てる。
+4. protobuf風のwireフィールドを走査して候補と文節を解析する。
+5. pipeから候補を取得できない場合にIMM32へ切り替える。
 
-The bridge also contains fallback heuristics:
+さらに、Google TIP、Microsoft IME TIP、旧日本語配列の探索、区切り文字・助詞による文節推測、カーソル位置とキー長による文節復元、文節末尾を付けた候補再構成などの規則を含みます。試作としては有用でしたが、native方式ではこれらの固定依存と推測処理を持ち込みません。
 
-- hardcoded layout probes such as Google TIP, Microsoft IME TIP, and legacy
-  Japanese layout.
-- heuristic delimiter/particle segmentation.
-- segment reconstruction by cursor position and key length.
-- candidate recomposition by appending segment tails.
+## 内製辞書経路
 
-These are useful as a prototype, but they are exactly the kind of hardcoding
-and workaround behavior the native design should remove.
-
-## Internal Dictionary Path
-
-The internal dictionary provider is wired into the build and factory:
+ビルドとfactoryへ接続済みの実装：
 
 - `src/provider/dictionary_conversion_provider.*`
 - `src/dictionary/morph_loader.*`
@@ -165,172 +110,106 @@ The internal dictionary provider is wired into the build and factory:
 - `data/dictionary/morph_dict.tsv`
 - `data/dictionary/jmdict.tsv`
 
-What works today:
+現在動く範囲：
 
-- morph TSV loading and indexing by surface and reading.
-- bilingual TSV loading and indexing by headword, kanji forms, and kana forms.
-- Layer1 returns raw reading, a segmented surface, and a small set of
-  alternates.
-- dictionary translation mode returns the first matching English gloss or a
-  passthrough error result.
-- LLM translation mode still delegates to the translation job queue.
+- 形態素TSVを読み込み、表層形と読みで索引化する。
+- 対訳TSVを読み込み、見出し語、漢字表記、かな表記で索引化する。
+- Layer 1で、生の読み、簡易分割した表層形、少数の代替候補を返す。
+- 辞書翻訳モードで最初に一致した英語語釈を返す。一致しない場合は入力を維持してエラーを返す。
+- LLM翻訳モードでは翻訳ジョブキューへ委譲する。
 
-What is partial:
+未完成の範囲：
 
-- Segmentation is simplified DP, not the full design in
-  `docs/dictionary/analysis_design.md`.
-- There is no POS transition matrix.
-- There is no feature-derived scoring model.
-- Layer2 is currently Layer1 retagged as Layer2, not a beam-search rewrite.
-- User learning settings are parsed but not used by the dictionary provider.
-- The provider does not emit `CandidateList.segments`.
-- Some tests and docs appear stale against the current provider constructor and
-  runtime behavior.
+- 文節分割は単純化した動的計画法で、`docs/dictionary/analysis_design.md`の完全な設計ではない。
+- 品詞遷移行列と特徴量由来のスコアモデルがない。
+- Layer 2はLayer 1のタグを付け替えた状態で、ビームサーチによる書き換えではない。
+- ユーザー学習設定は解析するが、辞書プロバイダーの順位付けへ利用していない。
+- `CandidateList.segments`を出力しない。
+- 一部のテストと文書が、現在のコンストラクターや実行時動作に追随していない可能性がある。
 
-Current hardcoded scoring and heuristic values include unknown-token penalty,
-maximum span length, kana-only penalty, length prior, confidence constants, and
-alternate-candidate cap. Those must become generated model data, validated
-configuration, or measured decoder parameters before the internal dictionary
-path can be treated as a principled replacement.
+未知語ペナルティ、最大span長、かな維持ペナルティ、長さ事前分布、信頼度、代替候補の上限には固定値があります。内製辞書を本格的な置換候補にする前に、生成済みモデル、検証済み設定、または実測したデコーダーパラメーターへ移す必要があります。
 
-## Option Comparison
+## 選択肢の比較
 
-| Option | Summary | Pros | Cons | Recommendation |
-| --- | --- | --- | --- | --- |
-| Keep `bridge` | Continue using `mozc_bridge.exe` as an opt-in experiment. | Best short-term behavior; already returns candidates and some segment data. | External process per request; private Google pipe; hardcoded converter path/protocol/KLIDs; opaque fallback; terms review needed. | Keep as research baseline only. |
-| Keep `imm32` | Use Windows IMM32 conversion list directly. | Simple, local fallback; required by compatibility goals. | Depends on active/installed IME; no segment metadata; limited control. | Keep as explicit fallback. |
-| Add `native` | First-class OSS Mozc backend below `IMozcTransport` or `IConversionProvider`. | Removes private GoogleIME pipe; can expose real segment data; allows controlled packaging and tests. | Requires Mozc build, protocol/API decision, dependency packaging, quality evaluation. | Recommended design path. |
-| Use internal dictionary now | Switch to RTAS `DictionaryConversionProvider`. | Fully local; deterministic; already in repo. | Prototype-level ranking; no mature language model; hardcoded scoring; no Layer2 beam; no segment metadata. | Do not use as Mozc replacement yet. |
-| Build internal dictionary to parity | Treat RTAS dictionary as a long-term independent decoder. | Maximum control; no external IME dependency. | Large decoder project; needs model generation, scoring, learning, evaluation. | Run in parallel after native baseline is defined. |
+| 選択肢 | 長所 | 短所 | 判断 |
+| --- | --- | --- | --- |
+| `bridge`を維持 | 現時点で最も確実に候補を返し、一部の文節情報も取得できる。 | 非公開Google pipe、固定パス／プロトコル／KLID、推測と代替処理を含む。 | 公開版の既定値として現行動作を維持しつつ、移行比較の基準とする。 |
+| `imm32`を維持 | 単純でローカルな互換経路。 | 有効なIMEへ依存し、文節情報がなく、実環境では候補を返さない構成があった。 | 明示的な比較・互換モードとして残す。 |
+| `native`を追加 | 非公開Google pipeを避け、正式な文節情報を取得できる可能性がある。配置とテストを管理しやすい。 | Mozcのビルド、API／プロトコル、依存物の配布、品質評価が必要。 | 推奨する設計経路。既定にはしない。 |
+| 内製辞書へ今すぐ切り替え | 完全ローカルで決定的。リポジトリ内に実装がある。 | ランキング、言語モデル、Layer 2、文節情報が試作段階。 | 現時点ではMozcの置換に使わない。 |
+| 内製辞書を長期的に育てる | 外部IMEへ依存せず、全体を制御できる。 | モデル生成、スコア、学習、品質評価を含む大規模なデコーダー開発になる。 | native基準を定めた後、独立系統として進める。 |
 
-## Recommended Migration Plan
+## 推奨する移行手順
 
-### Phase 0: Baseline And Evidence
+### Phase 0：基準と証拠
 
-- Keep `transport=bridge` as the portfolio default until a public replacement
-  proves equivalent candidate behavior.
-- Keep `transport=imm32` available only for controlled research comparisons.
-- Use `docs/operations/mozc_native_phase0_phase1.md` for the Phase 0 / Phase 1
-  plan and `tests/samples/provider_comparison/phase0_cases.tsv` as the initial
-  comparison corpus.
-- Add a repeatable candidate comparison corpus before native implementation:
-  - short words.
-  - clauses.
-  - sentences with particles.
-  - proper nouns.
-  - unknown words.
-  - mixed kana/Latin/number input.
-- Capture for each backend:
-  - top-N candidates.
-  - segment spans and surfaces.
-  - errors.
-  - cold and warm latency.
-  - whether fallback was used.
+- 代替経路が同等の候補動作を証明するまで、公開版の既定値を`transport=bridge`に保ちます。
+- `transport=imm32`は比較・互換確認用に残します。
+- `docs/operations/mozc_native_phase0_phase1.md`と`tests/samples/provider_comparison/phase0_cases.tsv`を比較基準に使います。
+- 短語、節、助詞を含む文、固有名詞、未知語、かな・英数字混在を含むコーパスで、上位候補、文節、エラー、コールド／ウォーム遅延、代替処理の有無を記録します。
 
-### Phase 1: Typed Config Design
+### Phase 1：型付き設定
 
-Phase 1 has implemented the first typed config layer for Mozc backends:
+実装済み：
 
-- `transport`: `bridge`, `server`, `imm32`, `native`, or invalid.
-- `server` is retained as a bridge alias for compatibility.
-- `native` constructs the app-local wrapper/server transport when its explicit
-  artifacts validate; otherwise initialization fails closed.
-- invalid transport values remain visible as configuration errors.
+- `transport`を`bridge`、`server`、`imm32`、`native`、不正値へ型付けして解析する。
+- 互換性のため`server`をBridgeの別名として残す。
+- `native`では成果物を明示設定し、検証できなければ初期化を失敗させる。
+- 不正値を暗黙に置換せず、設定エラーとして表示する。
 
-Phase 2 consumes only the minimal native settings needed for the fail-closed
-`mozc_server_client` boundary:
+Phase 2で利用する最小設定：
 
-- `native.backend`: `mozc_server_client` or `linked_converter`.
-- `native.root` or explicit dependency root, resolved against install root.
-- `native.mozc_build_artifact`: pinned Mozc artifact provenance.
-- `native.fallback_policy`: `none`, `imm32`, or `bridge`, with logging.
+- `native.backend`：`mozc_server_client`または`linked_converter`
+- `native.root`：インストールルートを基準に解決する依存物ルート
+- `native.mozc_build_artifact`：固定したMozc成果物の由来
+- `native.fallback_policy`：`none`、`imm32`、`bridge`。利用時は記録する。
 
-Future native-only settings should be added only when a backend consumes them:
+`native.timeout_ms`や`native.trace`などの追加設定は、実装が実際に利用する段階でだけ追加します。traceは既定で無効とし、明示許可がない限り入力文を保存しません。
 
-- `native.timeout_ms`, if the backend can block.
-- `native.trace`: off by default, structured, no prompt/input persistence unless
-  explicitly enabled.
+### Phase 2：ネイティブ・バックエンドの技術検証
 
-### Phase 2: Native Backend Spike
-
-Phase 2 must start with the comparison harness and backend route decision in:
+比較ツールと接続候補：
 
 - `docs/dictionary/mozc_native_backend_options.md`
 - `tools/provider_compare/New-ProviderComparisonRun.ps1`
 - `tests/manual/provider_comparison_phase0.md`
 
-Build an opt-in native backend only after those materials are in place. The
-backend must satisfy the existing `IMozcTransport` contract:
+`IMozcTransport`の契約を守り、1つの読みを入力として、順序付き候補、利用可能な正式文節情報、失敗時の構造化エラーを返します。UI固有処理、UIラベルを候補として生成する処理、非公開pipe解析、手書きprotobuf番号は含めません。
 
-- input: one reading string.
-- output: ordered candidate strings.
-- output: authoritative segment metadata where available.
-- output: structured error on backend failure.
-- no UI-specific behavior.
-- no generated candidates that are UI labels.
-- no private pipe scraping.
-- no manually encoded numeric protobuf fields.
+最初の推奨経路は、生成済みプロトコルと文書化したセッションライフサイクルを使うOSS `mozc_server`のクライアント／セッション境界です。直接リンク方式は、依存関係を安全に管理でき、サーバー方式が性能または文節要件を満たせない場合に限り検討します。
 
-Acceptable implementation routes:
+### Phase 3：評価
 
-1. Spawn or connect to OSS `mozc_server` through a client/session boundary that
-   uses generated Mozc protocol definitions and a documented session lifecycle.
-   This is the recommended first spike route.
-2. Link or host an OSS Mozc converter component directly only if its dependency
-   shape is proven manageable inside RTAS and the server/client route cannot
-   meet latency or segment requirements.
+既定化の前に確認する項目：
 
-Unacceptable implementation routes:
+- 10文字以下の読みで候補表示がプロジェクトの性能目標を満たす。
+- 一般語コーパスの上位1件／5件が、人手確認でBridge方式より劣らない。
+- 複数文節の入力で文節情報が存在し、一貫している。
+- バックエンドの失敗理由を利用者が確認できる。
+- 代替処理が明示され、記録される。
+- native経路に固定パス、固定プロトコル、固定配列依存が残っていない。
 
-1. Copy `mozc_bridge` pipe scraping into RTAS.
-2. Keep the hardcoded GoogleIME converter path.
-3. Keep hardcoded protocol field numbers.
-4. Guess segment boundaries when the backend fails to provide them.
+### Phase 4：既定値の変更
 
-### Phase 3: Evaluation Gate
+Phase 3を通過した後に限り、公開版の既定値を`bridge`から`native`へ変更するか検討します。その場合も`bridge`は比較・互換経路、`imm32`は互換モードとして残します。
 
-Native should not become default until it passes a comparison gate:
+### Phase 5：内製辞書
 
-- candidate popup under the project KPI for readings up to 10 characters.
-- no worse than bridge for common corpus top-1/top-5 quality by manual review.
-- segment metadata is present and coherent for multi-segment inputs.
-- backend failures are visible and actionable.
-- fallback behavior is explicit and logged.
-- no hardcoded path/protocol/layout dependencies remain in the native path.
+- 品詞遷移コストを生成する。
+- 辞書コスト空間を正規化する。
+- 未知語・信頼度の固定値をモデルまたは検証済み設定へ置き換える。
+- Layer 2のビームサーチを実装する。
+- 文節情報を出力する。
+- ユーザー学習を順位付けへ統合する。
+- Phase 0と同じコーパスでBridge／nativeと比較する。
 
-### Phase 4: Default Switch
+## 外部Mozcに関する前提
 
-Only after Phase 3 should RTAS consider changing the public default from
-`imm32` to `native`. Even then, `bridge` should remain a research-only
-comparison path and `imm32` a compatibility mode.
+OSS MozcはGoogle日本語入力と同一ではありません。公式資料では、MozcはGoogle日本語入力を基にしたOSSソースであり、Googleの正式サポート製品ではなく、安定版という概念もないと説明されています。システム辞書、連語データ、読み訂正、候補フィルター、QA、更新動作にも違いがあります。
 
-### Phase 5: Internal Dictionary Track
+WindowsビルドはBazel／Bazeliskを使い、Visual Studio、Python、.NET、Qt、LLVM／MSYS2／Ninjaなどの依存物を含みます。旧GYP手順は非推奨です。
 
-Internal dictionary work should continue, but as a separate decoder track:
-
-- generate POS transition costs.
-- normalize the dictionary cost space.
-- replace hardcoded unknown and confidence constants.
-- implement Layer2 beam search.
-- emit segment metadata.
-- add user learning into ranking.
-- compare against bridge/native outputs using the same Phase 0 corpus.
-
-## External Mozc Facts Affecting The Design
-
-The OSS Mozc project is not identical to Google Japanese Input. Official Mozc
-documentation states that Mozc is an OSS source release derived from Google
-Japanese Input, not an officially supported Google product, and it has no
-stable release concept. The branding notes also list differences in system
-dictionary, collocation data, reading correction data, suggestion filter, QA,
-and update behavior.
-
-The current Windows build document uses Bazel/Bazelisk and shows a package/MSI
-build path. It also lists a non-trivial dependency chain including Visual
-Studio, Python, .NET, Bazelisk, Qt build steps, LLVM/MSYS2/Ninja downloads, and
-GitHub Actions artifacts. Older GYP guidance is deprecated.
-
-References:
+参考資料：
 
 - https://github.com/google/mozc
 - https://code.googlesource.com/mozc/+/HEAD/doc/about_branding.md
@@ -338,42 +217,21 @@ References:
 - https://github.com/google/mozc/blob/master/src/protocol/
 - https://raw.githubusercontent.com/google/mozc/master/src/converter/converter_interface.h
 
-Implication: native OSS Mozc is likely better engineered than current private
-pipe scraping, but it may not match Google Japanese Input candidate quality
-without measurement. The migration must compare outputs before changing
-defaults.
+したがって、OSS Mozcのnative経路は現在の非公開pipe解析より保守しやすい可能性がありますが、Google日本語入力と同じ候補品質になるとは限りません。既定値の変更前に出力を比較します。
 
-## Risks And Open Questions
+## リスクと未解決事項
 
-- Which Mozc API boundary is stable enough for RTAS: linked converter, client
-  library, or server protocol?
-- How should Mozc dependencies be built and stored in this repository without
-  mixing build systems unsafely?
-- What license and attribution files are required for Mozc source,
-  third-party dependencies, and `dictionary_oss` data?
-- Can native return segment metadata in exactly the shape RTAS needs, or does
-  `CandidateList.segments` need richer fields?
-- Which non-silent fallback policy should a real native backend expose, if any?
-- Dictionary mode remains a prototype and still needs stronger ranking,
-  Layer2, segment metadata, and learning integration before it can be treated
-  as a Mozc replacement.
-- The Phase 1 typed transport layer does not answer the Mozc build,
-  dependency, packaging, or license questions for Phase 2.
-- The Phase 2 preflight recommendation is `mozc_server_client` first,
-  `linked_converter` second. The artifact pin is now
-  `fea1ebace034ade31c611344793f559800e366c9`, with a verified GitHub Actions
-  `Mozc64_x64.msi` artifact and `mozc_server.exe` start smoke. A real session
-  command sequence still needs an official client/session wrapper build, which
-  is blocked in this environment by missing Visual Studio ATL headers.
+- RTASに適したMozc API境界が、直接リンク、クライアントライブラリ、サーバープロトコルのどれか。
+- BazelとMSBuildの成果物・依存関係を混在させず、どのようにビルド・保存するか。
+- Mozcソース、第三者依存物、`dictionary_oss`データに必要なライセンス・帰属表示。
+- nativeがRTASの必要な形式で文節情報を返せるか、`CandidateList.segments`の拡張が必要か。
+- 実バックエンドが提供すべき、暗黙でない代替処理の方針。
+- 内製辞書は、順位付け、Layer 2、文節情報、学習統合を改善するまで試作扱いである。
 
-## Final Recommendation
+Phase 2の第一候補は`mozc_server_client`、第二候補は`linked_converter`です。成果物は`fea1ebace034ade31c611344793f559800e366c9`へ固定し、GitHub Actionsの`Mozc64_x64.msi`と`mozc_server.exe`起動を検証済みです。ATL／MFC追加後、公式クライアント／セッションラッパーとローカルビルドしたサーバーによる実セッション作成・変換・候補・文節取得にも成功しています。MSIを管理展開したサーバーは、完全なインストール環境なしではまだ利用できません。
 
-Proceed with design toward `transport=native`, but treat it as a new first-class
-backend, not as a refactor of the current bridge hacks. The typed Mozc
-transport config and evaluation corpus are now in place; the next engineering
-step is a native backend spike that uses a principled Mozc API/protocol boundary
-and remains opt-in.
+## 最終提案
 
-The internal dictionary path should not be positioned as the immediate Mozc
-replacement. It is valuable, but it needs a real decoder model and measured
-quality work before it can carry Layer1 conversion as the primary path.
+`transport=native`は、Bridge実装の非公開pipe処理を移植するのではなく、新しい独立バックエンドとして開発し、当面は任意で有効化する経路にします。
+
+内製辞書は価値のある長期経路ですが、実用的なデコーダーモデルと品質測定が揃う前に、Layer 1の既定変換としてMozcを置き換えるべきではありません。

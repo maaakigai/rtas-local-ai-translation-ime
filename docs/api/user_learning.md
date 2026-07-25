@@ -1,23 +1,29 @@
-# User Learning API Specification
+# ユーザー学習API仕様案
 
-## Goals
-- Capture confirmations, corrections, and rejected candidates so the dictionary provider can adjust rankings over time.
-- Keep the data store transparent and easy to reset (append-only JSONL files plus compact summaries).
-- Avoid affecting the existing LLM-first pipeline until dictionary mode is explicitly enabled.
+> この文書は、辞書モード向けに検討している設計案です。現在の公開版ではユーザー学習は既定で無効であり、通常のLLMモードでは学習データを保存しません。
 
-## Data Model
+## 目的
 
-### Event Types
-| Event | Description | Payload Fields |
+- 確定、訂正、候補の不採用を記録し、辞書プロバイダーが将来の候補順位を調整できるようにします。
+- 追記専用のJSONLと集約済みサマリーを使い、保存内容を確認しやすく、簡単に初期化できるようにします。
+- 辞書モードを明示的に有効化するまでは、既存のLLM中心の処理へ影響を与えません。
+
+## データモデル
+
+### イベント種別
+
+| イベント | 説明 | ペイロードのフィールド |
 | --- | --- | --- |
-| `conversion.accepted` | User confirmed a candidate produced by the dictionary provider. | `reading`, `surface`, `pos`, `provider_version` |
-| `conversion.corrected` | User replaced the proposed candidate with manual input. | `reading`, `surface`, `replacement`, `reason` (`typo`, `new_word`, `preference`) |
-| `translation.selected` | User cycled to a translation candidate and confirmed it. | `source_text`, `target_text`, `rank`, `confidence_hint` |
-| `candidate.reordered` | User promoted or demoted a candidate via UI controls. | `reading`, `surface`, `delta` (+/- integer) |
+| `conversion.accepted` | ユーザーが辞書プロバイダーの候補を確定した。 | `reading`, `surface`, `pos`, `provider_version` |
+| `conversion.corrected` | 提示候補をユーザーが手入力で訂正した。 | `reading`, `surface`, `replacement`, `reason`（`typo`、`new_word`、`preference`） |
+| `translation.selected` | ユーザーが翻訳候補へ切り替えて確定した。 | `source_text`, `target_text`, `rank`, `confidence_hint` |
+| `candidate.reordered` | UI操作で候補の順位を上げ下げした。 | `reading`, `surface`, `delta`（正または負の整数） |
 
-### Storage Layout
-- Events are appended as newline-delimited JSON (`.jsonl`) under `data/user_learn/profiles/<SID>/events.log`.
-- Periodic compaction writes `summary.json`:
+### 保存構成
+
+- イベントは、`data/user_learn/profiles/<SID>/events.log`へ1行1件のJSON（`.jsonl`）として追記します。
+- 定期的な集約処理で`summary.json`を書き出します。
+
   ```json
   {
     "version": 1,
@@ -31,34 +37,37 @@
     }
   }
   ```
-- Compaction is triggered on IME shutdown or after 500 appended events, whichever comes first.
 
-## Compression Workflow Draft
-1. **Aggregation trigger**  
-   When `events.log` grows beyond 2 MB or more than 1,000 events, enqueue a background compaction task; always trigger on IME shutdown.
-2. **Snapshot rotation**  
-   Flush buffers, rename `events.log` to `events-<timestamp>.jsonl`, and reopen a fresh log for new events.
-3. **Summarisation**  
-   Parse the rotated log, fold counts into `summary.json`, and emit a diff file `totals-<timestamp>.json` for diagnostics.
-4. **Compression**  
-   Gzip the rotated log into `archive/events-<timestamp>.jsonl.gz`. Store the original file size and CRC32 alongside the gzip to support integrity checks, then delete the plain-text copy.
-5. **Retention**  
-   Keep the latest seven gzip archives; prune older files to cap disk usage. Record the most recent archive timestamp in `summary.json`.
-6. **Recovery**  
-   On startup, scan `archive/` and `profiles/<SID>/` for orphaned `.jsonl` files; reprocess them if a previous compaction terminated mid-way.
+- 集約は、IME終了時または500件のイベント追記後のうち、先に到達した時点で開始する想定です。
 
-Implementation notes:
-- Compression runs on a low-priority worker thread so UI input latency is unaffected.
-- All metadata (timestamps, hash, compressed size) lives in `summary.json`, allowing the diagnostics surface to show the last compaction result.
-- A future CLI helper can bundle the latest archives for support escalation.
+## 圧縮処理の設計案
 
-## API Surface (C++)
+1. **集約開始条件**
+   `events.log`が2 MBを超えるか、1,000件を超えた場合にバックグラウンド集約を予約します。IME終了時には必ず開始します。
+2. **スナップショットのローテーション**
+   バッファを書き出し、`events.log`を`events-<timestamp>.jsonl`へ変更して、新しいイベント用の空ログを開き直します。
+3. **集約**
+   ローテーションしたログを解析して回数を`summary.json`へ反映し、診断用の差分`totals-<timestamp>.json`を出力します。
+4. **圧縮**
+   ローテーションしたログを`archive/events-<timestamp>.jsonl.gz`へgzip圧縮します。整合性確認用に元ファイルのサイズとCRC32を記録した後、平文のコピーを削除します。
+5. **保持期間**
+   最新7件のgzipアーカイブを残し、それより古いファイルを削除してディスク使用量を制限します。最新アーカイブの日時は`summary.json`へ記録します。
+6. **復旧**
+   起動時に`archive/`と`profiles/<SID>/`を走査し、前回の集約が途中終了して孤立した`.jsonl`があれば再処理します。
+
+実装時の注意事項：
+
+- UI入力の遅延を避けるため、圧縮は優先度の低いワーカースレッドで実行します。
+- 日時、ハッシュ、圧縮後サイズなどのメタデータを`summary.json`へ保存し、診断画面から直近の集約結果を確認できるようにします。
+- 将来、サポート調査用に最新アーカイブをまとめるCLI補助ツールを追加できます。
+
+## C++ API
 ```cpp
 namespace ime::learning {
 
 struct LearningEvent {
-  std::string type;           // e.g. "conversion.accepted"
-  std::string payload_json;   // Serialized payload for append-only logging.
+  std::string type;           // 例："conversion.accepted"
+  std::string payload_json;   // 追記ログ用にシリアライズしたペイロード
 };
 
 class UserLearningStore {
@@ -74,13 +83,15 @@ std::unique_ptr<UserLearningStore> CreateFileStore(
 }  // namespace ime::learning
 ```
 
-## Integration Plan
-1. **Configuration gating** – only instantiate the learning store when `provider.dictionary.learning.enable` is true.
-2. **Event plumbing** – extend conversion callbacks to emit `LearningEvent` objects once dictionary mode shipping criteria are met.
-3. **Compaction service** – background worker performs the compression workflow above; disabled entirely while in LLM-only mode.
-4. **Telemetry reset** – expose a command in the settings UI (or CLI script) that wipes `profiles/<SID>` after confirming with the user.
+## 統合計画
 
-## Security & Privacy
-- Files inherit the user's profile ACLs; no elevation required.
-- Events redact control characters and truncate payload strings to a safe length (currently 64 code units).
-- Future enhancement: optional DPAPI encryption for enterprise builds.
+1. **設定による有効化**：`provider.dictionary.learning.enable`が`true`の場合にだけ学習ストアを生成します。
+2. **イベントの接続**：辞書モードが公開基準を満たした段階で変換コールバックを拡張し、`LearningEvent`を送出します。
+3. **集約サービス**：バックグラウンドワーカーが前述の圧縮処理を実行します。LLM専用モードでは完全に無効化します。
+4. **学習データの初期化**：ユーザーの確認後に`profiles/<SID>`を消去する操作を、設定UIまたはCLIスクリプトから利用できるようにします。
+
+## セキュリティとプライバシー
+
+- ファイルはユーザープロファイルのアクセス制御を継承し、管理者権限を必要としません。
+- イベントから制御文字を除去し、ペイロード文字列を安全な長さ（現在の案では64コード単位）に制限します。
+- 将来案として、企業向けビルドではDPAPIによる任意の暗号化を検討します。

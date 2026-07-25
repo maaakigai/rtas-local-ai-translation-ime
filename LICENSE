@@ -1,5 +1,7 @@
 Copyright (c) 2026 RTAS author. All rights reserved.
 
+The English text in this file is the authoritative license notice.
+
 The contents of this repository are made publicly viewable for portfolio,
 employment-evaluation, security review, and educational reference purposes.
 No permission is granted to copy, modify, distribute, sublicense, sell, or use
@@ -9,3 +11,21 @@ Third-party components and external products remain subject to their own
 licenses and terms. See THIRD_PARTY_NOTICES.md and NOTICE.md. This notice does
 not restrict rights that applicable law grants independently of copyright
 permission.
+
+---
+
+## 日本語参考訳
+
+Copyright (c) 2026 RTAS author. All rights reserved.
+
+このファイルの英語本文を正式なライセンス通知とします。以下は理解を助けるための
+参考訳であり、英語本文を置き換えるものではありません。
+
+このリポジトリの内容は、ポートフォリオの閲覧、採用評価、セキュリティレビュー、
+教育上の参照を目的として公開しています。作者が権利を所有する部分について、
+事前の書面による許可なく、別の製品へ複製、改変、配布、再許諾、販売、利用する許可は
+与えていません。
+
+第三者コンポーネントと外部製品には、それぞれのライセンスと利用条件が適用されます。
+`THIRD_PARTY_NOTICES.md`と`NOTICE.md`を参照してください。この通知は、著作権者の
+許諾とは別に適用法令によって認められる権利を制限するものではありません。

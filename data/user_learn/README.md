@@ -1,12 +1,14 @@
-# User Learning Data
+# ユーザー学習データ
 
-This directory stores per-user adaptation artefacts for the IME dictionary pipeline. Files are intentionally simple JSON/TSV blobs so they can be inspected or reset without special tooling.
+このディレクトリは、IMEの辞書パイプラインで利用するユーザー別の適応データを保存するための予約領域です。専用ツールがなくても内容の確認や初期化ができるよう、ファイル形式には単純なJSON／TSVを想定しています。
 
-## Proposed Layout
-- `profiles/` – one subdirectory per Windows user SID, allowing multiple accounts on the same machine.
-- `profiles/<SID>/events.log` – newline-delimited JSON events captured via the user learning API.
-- `profiles/<SID>/summary.json` – periodically compacted aggregates (n-gram counts, correction stats).
-- `tmp/` – scratch space for background compaction jobs; safe to purge.
+> 現在の公開版では、ユーザー学習は既定で無効です。以下は辞書モード向けの設計案であり、通常のLLMモードではファイルを作成しません。
 
-`profiles/` and `tmp/` are created lazily when the learning provider is initialised in dictionary mode. No files are created while LLM mode remains active.
+## 想定する構成
 
+- `profiles/`：WindowsユーザーのSIDごとにサブディレクトリを作成し、同じPC上の複数アカウントを分離します。
+- `profiles/<SID>/events.log`：ユーザー学習APIが記録する、1行1件のJSONイベントです。
+- `profiles/<SID>/summary.json`：定期的に集約した統計（n-gram回数、訂正回数など）です。
+- `tmp/`：バックグラウンド集約処理の一時領域です。削除しても問題ありません。
+
+`profiles/`と`tmp/`は、辞書モードで学習機能を初期化した場合にのみ必要に応じて作成する想定です。

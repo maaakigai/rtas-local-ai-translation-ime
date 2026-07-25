@@ -1,4 +1,4 @@
-# Keymap Probe
+# キーマップ検証ツール
 
 押したキーの `VirtualKeyCode` と実際の入力文字を対話式で記録し、`txt` に保存します。
 
