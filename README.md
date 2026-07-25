@@ -18,9 +18,10 @@ WindowsのIME互換APIから得たかな漢字変換結果と、Ollamaで実行�
 > 利用にはソースからのビルドとIMEの手動登録が必要です。
 
 > [!WARNING]
-> 既定設定はWindowsの公開IMM32 APIを使います。`transport=bridge`はGoogle日本語入力の
-> 非公開・不安定な実装詳細を調査する実験経路であり、製品利用や再配布向けではありません。
-> 更新で動作しなくなる可能性があり、利用規約上の扱いも独立した確認が必要です。
+> オリジナルのかな漢字変換を維持するため、既定設定は`transport=bridge`を使います。
+> この経路はGoogle日本語入力の非公開・不安定な実装詳細に依存するため、
+> Google日本語入力の更新で動作しなくなる可能性があります。製品利用や再配布を前提とせず、
+> 応募用プロトタイプとして利用条件を独立して確認してください。
 
 開発判断と生成AI支援の区分は[開発プロセス](DEVELOPMENT_PROCESS.md)、第三者要素と
 再配布範囲は[NOTICE](NOTICE.md)および[第三者通知](THIRD_PARTY_NOTICES.md)に記載しています。
@@ -37,7 +38,7 @@ WindowsのIME互換APIから得たかな漢字変換結果と、Ollamaで実行�
 | 領域 | 実装内容 |
 | --- | --- |
 | Windows IME | TSF（Text Services Framework）を利用したネイティブIME |
-| 日本語変換 | 既定はWindows IMM32 API、実験経路としてGoogle日本語入力互換ブリッジを検証 |
+| 日本語変換 | 既定はGoogle日本語入力互換ブリッジ、IMM32とOSS Mozc Nativeは実験経路 |
 | AI支援 | Ollama上のローカルLLMによる言い換え・日英翻訳 |
 | 候補UI | 日本語・言い換え・翻訳を切り替えられる3レイヤーUI |
 | 応答性 | LLM処理をワーカースレッドへ分離し、入力UIの停止を回避 |
@@ -61,7 +62,7 @@ RTASでは、入力から翻訳までを次の3レイヤーで扱います。
 
 ### ローカルファースト
 
-かな漢字変換にはインストール済みのWindows IME、翻訳には既定で`127.0.0.1`上のOllamaを使用します。
+かな漢字変換にはローカルのGoogle日本語入力、翻訳には既定で`127.0.0.1`上のOllamaを使用します。
 チェックイン済み設定のままなら入力内容をクラウド翻訳APIへ送りません。ただし
 `IME3_OLLAMA_HOST`等で外部ホストへ変更できるため、その場合の送信先とデータ取扱いは
 設定者が確認する必要があります。
@@ -89,8 +90,8 @@ flowchart TD
     textService["RTAS TSF TextService"]
     candidateUI["コンポジション・候補UI"]
     provider["ConversionProvider"]
-    installedIME["インストール済み日本語IME<br/>Windows IMM32 API"]
-    fallback["IMM32・辞書プロバイダー"]
+    installedIME["Google日本語入力<br/>in-process bridge"]
+    fallback["IMM32・辞書・Native実験経路"]
     workQueue["非同期ワークキュー"]
     ollama["Ollama HTTP API"]
     localLLM["ローカルLLM"]
@@ -111,9 +112,10 @@ flowchart TD
     settings --> workQueue
 ```
 
-通常のかな漢字変換では、RTAS DLLからWindowsの公開IMM32 APIを利用します。
-`mozc_bridge.exe`は、Google日本語入力の非公開セッション境界を調査した診断用CLIです。
-現在の既定動作には使わず、互換性・保守性・利用条件の確認を要する研究資産として分離しています。
+通常のかな漢字変換では、RTAS DLLへ組み込んだbridge実装から
+Google日本語入力のローカルセッション境界へ接続します。`mozc_bridge.exe`は、
+同じ候補取得処理をRTAS本体から切り離して確認する診断用CLIであり、通常動作では起動しません。
+bridgeは公開APIではないため、互換性・保守性・利用条件に注意が必要です。
 
 ## 技術スタック
 
@@ -131,8 +133,7 @@ flowchart TD
 ### 実行環境
 
 - Windows 10 / 11 x64
-- Windowsに登録された日本語IME
-  - Windows標準のMicrosoft IME、または[Google 日本語入力 Windows版](https://www.google.co.jp/ime/)など
+- [Google 日本語入力 Windows版](https://www.google.co.jp/ime/)
 - [Ollama for Windows](https://docs.ollama.com/windows)
 - Ollamaモデル用の空き容量
   - `gemma3:4b`の場合は約3.3 GB
@@ -165,12 +166,11 @@ winget install --id Microsoft.VisualStudio.2022.BuildTools --exact --source wing
   --override "--wait --passive --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"
 ```
 
-### 3. Windowsの日本語IMEを確認
+### 3. Google日本語入力を準備
 
-Windows標準のMicrosoft IMEや[Google 日本語入力](https://www.google.co.jp/ime/)など、
-Windowsに登録された日本語IMEで単体の日本語変換ができることを確認します。
-既定の`transport=imm32`ではWindowsの公開IMM32 APIを利用するため、
-Google日本語入力は必須ではありません。Google日本語入力固有の`bridge`経路は実験用です。
+[Google 日本語入力](https://www.google.co.jp/ime/)をインストールし、単体で日本語変換が
+できることを確認します。既定の`transport=bridge`は、Google日本語入力のローカル変換処理を
+RTAS DLL内のbridge実装から呼び出します。Windows標準のMicrosoft IMEだけでは動作しません。
 
 ### 4. Ollamaとモデルを準備
 
@@ -268,7 +268,7 @@ Releaseビルドの実行時には`x64\Release\config\ime_settings.json`を読�
 
 ```text
 provider.kana.mode                         = "mozc"
-provider.kana.mozc.transport               = "imm32"
+provider.kana.mozc.transport               = "bridge"
 provider.kana.mozc.kana_kanji_only_mode    = false
 provider.translation.mode                  = "llm"
 provider.translation.llm.model             = "default"
@@ -340,7 +340,8 @@ Docker版Ollamaも同じHTTP APIで利用できます。Windows版と同時に�
 ### かな漢字候補が表示されない
 
 - Windowsの設定で日本語IMEが追加され、単体で変換できることを確認します。
-- `provider.kana.mozc.transport`が既定の`imm32`になっていることを確認します。
+- Google日本語入力がインストールされ、単体で変換できることを確認します。
+- `provider.kana.mozc.transport`が既定の`bridge`になっていることを確認します。
 - 設定変更後は入力対象のアプリを再起動します。
 
 ### 言い換え・英訳候補が表示されない
@@ -422,10 +423,10 @@ RTAS
 
 - Windows x64を主な対象としています。
 - インストーラーと自動更新機能は未実装です。
-- Windowsに登録された日本語IMEとOllamaの事前インストールが必要です。
+- Google日本語入力とOllamaの事前インストールが必要です。
 - 初回翻訳はモデルのロードにより時間がかかる場合があります。
-- 既定のかな漢字変換経路はWindows IMM32 APIで、IMEごとの差異があります。
-- `bridge`経路とMozcネイティブバックエンドは調査・検証段階です。
+- 既定のbridge経路はGoogle日本語入力の非公開セッション境界に依存します。
+- IMM32経路とMozcネイティブバックエンドは調査・検証段階です。
 - `Ime3/rtas_text_service.h`にはまだ複数の責務が集中しており、候補状態、キー処理、
   非同期連携を段階的に分割する余地があります。
 

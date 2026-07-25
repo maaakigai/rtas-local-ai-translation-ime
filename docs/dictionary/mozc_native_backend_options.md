@@ -8,9 +8,9 @@ This document compares native backend routes only. It does not implement a
 native conversion engine.
 
 > Historical decision record: this comparison was written when
-> `transport=bridge` was the default. The 2026-07-25 public snapshot instead
-> defaults to `transport=imm32`; the bridge is retained only as an opt-in
-> compatibility experiment.
+> `transport=bridge` was the default. A temporary 2026-07-25 snapshot change
+> selected `transport=imm32`, but live testing returned no candidates.
+> The checked-in default now restores `transport=bridge`.
 
 ## Source Baseline
 

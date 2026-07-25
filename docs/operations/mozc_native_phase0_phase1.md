@@ -6,10 +6,11 @@ Scope: preserve all current RTAS behavior while preparing for a future
 transport parser and validation layer, but not the native conversion engine.
 
 > Historical decision record: this phase plan predates the 2026-07-25 public
-> snapshot hardening. The checked-in default is now `transport=imm32`;
-> `transport=bridge` remains an opt-in research path only. Later Phase 3 work
-> implemented the opt-in app-local wrapper/server runtime; external Mozc build
-> artifacts are intentionally not bundled in this public repository.
+> snapshot work. A temporary hardening change selected `transport=imm32`, but
+> live testing returned no candidates. The checked-in default therefore
+> restores `transport=bridge` to preserve the original portfolio behavior.
+> Later Phase 3 work implemented the opt-in app-local wrapper/server runtime;
+> external Mozc build artifacts are intentionally not bundled here.
 
 ## Decision
 
@@ -25,8 +26,8 @@ workarounds into the RTAS DLL.
 
 The following existing behavior must remain unchanged during Phase 0 / Phase 1:
 
-- At the time of this phase, `transport=bridge` was the active configured path.
-- In the current public snapshot, `transport=imm32` is the default compatibility path.
+- `transport=bridge` is the active configured path.
+- `transport=imm32` remains available only for explicit comparison testing.
 - `transport=native` is not the default.
 - Layer1 still enters through `IConversionProvider::FetchLayer1`.
 - Layer2 still enters through `IConversionProvider::FetchLayer2`.
@@ -46,9 +47,9 @@ and marked invalid instead of being silently downgraded.
 
 | Config value | Type value | Current runtime state | Notes |
 | --- | --- | --- | --- |
-| `bridge` | `MozcTransport::kBridge` | Supported, opt-in research | Calls the bridge implementation compiled into the DLL; a standalone diagnostic CLI is also built. |
+| `bridge` | `MozcTransport::kBridge` | Public snapshot default | Calls the bridge implementation compiled into the DLL; a standalone diagnostic CLI is also built. |
 | `server` | `MozcTransport::kBridge` | Supported legacy alias | Kept only for backward compatibility. |
-| `imm32` | `MozcTransport::kImm32` | Public snapshot default | Existing direct IMM32 candidate path. |
+| `imm32` | `MozcTransport::kImm32` | Experimental comparison path | Direct IMM32 candidate path; live testing returned no candidates on the submission machine. |
 | `native` | `MozcTransport::kNative` | Phase 3 app-local `mozc_server_client` runtime path | Must stay opt-in and non-default until the native gate passes. |
 | unsupported string | `MozcTransport::kInvalid` | Configuration error | Does not fall back to `imm32`, `bridge`, or `llm`. |
 

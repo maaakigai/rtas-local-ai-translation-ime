@@ -72,8 +72,8 @@ int main() try {
                "default file logging max bytes");
         expect(defaultSettings.kana.mozc.has_value(), "default mozc settings populated");
         if (defaultSettings.kana.mozc) {
-            expect(defaultSettings.kana.mozc->transport == MozcTransport::kImm32,
-                   "default mozc transport is IMM32");
+            expect(defaultSettings.kana.mozc->transport == MozcTransport::kBridge,
+                   "default mozc transport is bridge");
         }
     }
 
@@ -234,8 +234,8 @@ int main() try {
         expect(error.empty(), "missing transport config parse");
         expect(settings.kana.mozc.has_value(), "missing transport mozc settings");
         if (settings.kana.mozc) {
-            expect(settings.kana.mozc->transport == MozcTransport::kImm32,
-                   "missing transport defaults to imm32");
+            expect(settings.kana.mozc->transport == MozcTransport::kBridge,
+                   "missing transport defaults to bridge");
         }
     }
     {

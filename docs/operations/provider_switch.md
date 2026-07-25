@@ -4,8 +4,8 @@ This document describes the current `config/ime_settings.json` provider shape.
 
 ## Current Default
 
-The checked-in public default uses the documented Windows IMM32 path for
-kana-kanji conversion and LLM mode for translation:
+The checked-in public default restores the original bridge path for
+kana-kanji conversion and uses LLM mode for translation:
 
 ```json
 {
@@ -14,7 +14,7 @@ kana-kanji conversion and LLM mode for translation:
       "mode": "mozc",
       "mozc": {
         "enabled": true,
-        "transport": "imm32"
+        "transport": "bridge"
       }
     },
     "translation": {
@@ -28,7 +28,7 @@ kana-kanji conversion and LLM mode for translation:
 
 | Mode | Status | Notes |
 | --- | --- | --- |
-| `mozc` | Current default | Uses `provider.kana.mozc.transport`; public default is `imm32`. |
+| `mozc` | Current default | Uses `provider.kana.mozc.transport`; public default is `bridge`. |
 | `dictionary` | Available prototype | Uses TSV dictionaries; not Mozc parity. |
 | `llm` | Legacy/fallback mode | Kept for compatibility with older configs. |
 
@@ -38,13 +38,17 @@ kana-kanji conversion and LLM mode for translation:
 
 | JSON value | Typed value | Status |
 | --- | --- | --- |
-| `bridge` | `MozcTransport::kBridge` | Supported opt-in research path. |
+| `bridge` | `MozcTransport::kBridge` | Current default; preserves the original Google Japanese Input conversion path. |
 | `server` | `MozcTransport::kBridge` | Legacy alias for `bridge`. |
-| `imm32` | `MozcTransport::kImm32` | Public snapshot default compatibility path. |
+| `imm32` | `MozcTransport::kImm32` | Experimental direct IMM32 path; not the default because it returned no candidates in live testing. |
 | `native` | `MozcTransport::kNative` | Phase 3 app-local `mozc_server_client` runtime; opt-in only. |
 
 Invalid transport strings are configuration errors. They must not silently
 downgrade to `imm32`, `bridge`, or `llm`.
+
+The bridge depends on a private Google Japanese Input session boundary. It is
+the checked-in default only to preserve the working portfolio experience.
+It is not a stable public API or a production recommendation.
 
 `server` here is only the legacy RTAS alias for the current bridge transport.
 It does not mean the future OSS Mozc `mozc_server_client` native route.

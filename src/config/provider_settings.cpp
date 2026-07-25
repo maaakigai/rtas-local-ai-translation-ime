@@ -27,8 +27,8 @@ DictionarySettings MakeDefaultDictionarySettings() {
 MozcSettings MakeDefaultMozcSettings() {
   MozcSettings mozc;
   mozc.enabled = false;
-  mozc.transport = MozcTransport::kImm32;
-  mozc.transport_value = "imm32";
+  mozc.transport = MozcTransport::kBridge;
+  mozc.transport_value = "bridge";
   mozc.timeout_ms = 50;
   mozc.kana_kanji_only_mode = false;
   mozc.native.backend = MozcNativeBackend::kUnset;

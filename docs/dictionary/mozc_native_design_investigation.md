@@ -6,10 +6,11 @@ document records the architectural direction and the Phase 1 typed transport
 state; it does not describe a completed native conversion engine.
 
 > Historical decision record: the recommendation below predates the
-> 2026-07-25 public snapshot hardening. The current checked-in default is
-> `transport=imm32`, while `bridge` is opt-in research code. Later Phase 3 work
-> implemented an opt-in app-local wrapper/server boundary for `native`; the
-> public repository does not bundle the external Mozc build artifacts it needs.
+> 2026-07-25 public snapshot work. A temporary hardening change selected
+> `transport=imm32`, but live testing returned no candidates. The current
+> checked-in default restores `transport=bridge`. Later Phase 3 work implemented
+> an opt-in app-local wrapper/server boundary for `native`; the public repository
+> does not bundle the external Mozc build artifacts it needs.
 
 ## Executive Decision
 
@@ -72,14 +73,15 @@ Important integration points:
 
 ### Config And Factory Selection
 
-The current public config selects the IMM32 compatibility path:
+The current public config restores the bridge path:
 
 - `config/ime_settings.json`
   - `provider.kana.mode = "mozc"`
-  - `provider.kana.mozc.transport = "imm32"`
+  - `provider.kana.mozc.transport = "bridge"`
 
-The bridge remains an opt-in research path. Its implementation is compiled into
-the RTAS DLL and is also buildable as a standalone diagnostic executable.
+The bridge implementation is compiled into the RTAS DLL and is also buildable
+as a standalone diagnostic executable. It remains a private compatibility
+boundary rather than a stable public API.
 
 `src/config/provider_settings.*` keeps the serialized JSON `transport` value as
 a string, but parses it into a typed `MozcTransport` domain:
@@ -205,8 +207,9 @@ path can be treated as a principled replacement.
 
 ### Phase 0: Baseline And Evidence
 
-- Keep `transport=imm32` as the public default compatibility path.
-- Keep `transport=bridge` available only for controlled research comparisons.
+- Keep `transport=bridge` as the portfolio default until a public replacement
+  proves equivalent candidate behavior.
+- Keep `transport=imm32` available only for controlled research comparisons.
 - Use `docs/operations/mozc_native_phase0_phase1.md` for the Phase 0 / Phase 1
   plan and `tests/samples/provider_comparison/phase0_cases.tsv` as the initial
   comparison corpus.

@@ -27,7 +27,7 @@
       },
       "mozc": {
         "enabled": true,
-        "transport": "imm32",
+        "transport": "bridge",
         "timeout_ms": 1000,
         "kana_kanji_only_mode": false
       }

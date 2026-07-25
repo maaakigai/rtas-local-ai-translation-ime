@@ -77,8 +77,8 @@ struct MozcNativeSettings {
 
 struct MozcSettings {
   bool enabled = false;
-  MozcTransport transport = MozcTransport::kImm32;
-  std::string transport_value = "imm32";
+  MozcTransport transport = MozcTransport::kBridge;
+  std::string transport_value = "bridge";
   int timeout_ms = 50;
   bool kana_kanji_only_mode = false;
   MozcNativeSettings native;
