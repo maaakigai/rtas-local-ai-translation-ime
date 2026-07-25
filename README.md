@@ -149,6 +149,27 @@ bridgeは公開APIではないため、互換性・保守性・利用条件に�
 
 ## セットアップ
 
+### バッチファイルによる最短セットアップ
+
+Git、Visual Studio Build Tools 2022、Google日本語入力、Ollamaとモデルを準備した後は、
+リポジトリ直下のバッチファイルでDebug x64版をビルド・登録できます。
+
+1. `build_solution_debug_x64.bat`をダブルクリックします。
+2. `[OK] Build succeeded.`と表示されたら、任意のキーでウィンドウを閉じます。
+3. `install_rtas_x64.bat`をダブルクリックし、ユーザーアカウント制御を許可します。
+4. `RTAS install completed.`と表示されたら、入力対象のアプリを再起動します。
+5. `Win + Space`から`RTAS`を選択し、動作を確認します。
+
+`install_rtas_x64.bat`は`x64\Debug\Ime3.dll`を登録し、
+`config\ime_settings.json`を`x64\Debug\config`へコピーします。ビルドは行わないため、
+初回およびソース変更後は必ず`build_solution_debug_x64.bat`を先に実行してください。
+
+アンインストールするときは、入力対象のアプリを閉じてから
+`uninstall_rtas_x64.bat`をダブルクリックし、ユーザーアカウント制御を許可します。
+登録したDLLが必要になるため、アンインストール前にリポジトリや`x64\Debug`を削除しないでください。
+
+以下は、各処理を確認しながらRelease x64版を手動でビルド・登録する手順です。
+
 ### 1. リポジトリを取得
 
 ```powershell
@@ -392,6 +413,9 @@ IME固有の操作やOllama障害時の挙動は、[`tests/manual`](tests/manual
 
 ```text
 RTAS
+├─ build_solution_debug_x64.bat   Debug x64ワンクリックビルド
+├─ install_rtas_x64.bat           Debug x64登録・実行時設定配置
+├─ uninstall_rtas_x64.bat         Debug x64登録解除
 ├─ Ime3/                 TSF TextService、候補UI、登録処理
 ├─ Imm32Ime/             IMM32互換実装
 ├─ ImmInstall/           IMM32登録補助ツール
@@ -431,6 +455,11 @@ RTAS
   非同期連携を段階的に分割する余地があります。
 
 ## アンインストール
+
+Debug x64版を`install_rtas_x64.bat`で登録した場合は、入力対象のアプリを閉じてから
+`uninstall_rtas_x64.bat`をダブルクリックするのが最短です。
+
+Release x64版を手動登録した場合は、次の手順で登録を解除します。
 
 PowerShellを管理者として開き、登録時に使用したDLLを解除します。
 
