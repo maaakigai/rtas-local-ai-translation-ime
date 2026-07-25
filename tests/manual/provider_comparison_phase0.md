@@ -1,37 +1,25 @@
-# Provider Comparison Phase 0 Manual Procedure
+# プロバイダー比較 Phase 0 手動手順
 
-Use this procedure to compare current and future kana-kanji backends without
-changing RTAS runtime behavior by default.
+RTASの既定動作を変えず、現在と将来のかな漢字変換バックエンドを比較するための手順です。
 
-The app-local native wrapper/server boundary is implemented, but this public
-repository intentionally does not bundle its external Mozc build artifacts.
-The checked-in unavailable fixture documents the no-artifact smoke case rather
-than claiming that the runtime boundary is unimplemented.
+アプリ内nativeラッパー／サーバーの境界は実装済みですが、公開リポジトリには外部Mozcビルド成果物を同梱していません。リポジトリ内の「成果物なし」テストデータは、runtime境界が未実装だと主張するものではなく、成果物がない場合の応答を記録します。
 
-## Inputs
+## 入力
 
-- Corpus: `tests/samples/provider_comparison/phase0_cases.tsv`
-- Backends:
-  - `bridge`: `provider.kana.mode = "mozc"`,
-    `provider.kana.mozc.transport = "bridge"`
-  - `imm32`: `provider.kana.mode = "mozc"`,
-    `provider.kana.mozc.transport = "imm32"`
-  - `dictionary`: `provider.kana.mode = "dictionary"`
-  - `native`: opt-in app-local `mozc_server_client` path; requires explicitly
-    configured wrapper and server artifacts.
+- コーパス：`tests/samples/provider_comparison/phase0_cases.tsv`
+- バックエンド：
+  - `bridge`：`provider.kana.mode = "mozc"`、`provider.kana.mozc.transport = "bridge"`
+  - `imm32`：`provider.kana.mode = "mozc"`、`provider.kana.mozc.transport = "imm32"`
+  - `dictionary`：`provider.kana.mode = "dictionary"`
+  - `native`：任意で有効化するアプリ内`mozc_server_client`。明示設定したラッパーとサーバー成果物が必要。
 
-Do not commit local config flips used for manual comparison.
+比較のために変更したローカル設定はコミットしないでください。
 
-Evaluation logs must be limited to rows from the repo corpus above. Do not add
-arbitrary personal input, active editor text, full DebugView dumps, native trace
-dumps, prompt text, or persisted user input to comparison artifacts.
+評価ログへの入力は、上記コーパスの行だけに限定します。個人的な入力、開いているeditorの文章、DebugViewの全出力、native trace全体、プロンプト、保存済み利用者入力を比較結果へ追加しないでください。
 
-## JSONL Harness
+## JSONLツール
 
-Use `tools/provider_compare/New-ProviderComparisonRun.ps1` to create one JSONL
-record per corpus row and to validate filled comparison results.
-
-Create an empty capture file for a backend:
+`tools/provider_compare/New-ProviderComparisonRun.ps1`を使い、コーパス1行につきJSONL 1件のテンプレートを作成し、記入後の結果を検証します。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
@@ -41,14 +29,12 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -Output tmp_provider_comparison/bridge.jsonl
 ```
 
-Supported `-Backend` values are `bridge`, `server`, `imm32`, `dictionary`, and
-`native`. `server` records the legacy RTAS alias and has
-`effective_transport = "bridge"`. `native` records the app-local
-`mozc_server_client` path. It can perform conversion when the configured wrapper
-and server artifacts exist; otherwise it must record an explicit unavailable
-error without silently falling back.
+`-Backend`は`bridge`、`server`、`imm32`、`dictionary`、`native`に対応します。
 
-Validate a filled capture file before comparing it:
+- `server`はRTASの旧別名で、`effective_transport = "bridge"`になります。
+- `native`はアプリ内`mozc_server_client`経路です。ラッパーとサーバーがあれば変換を行い、なければ暗黙に切り替えず、利用不能エラーを記録します。
+
+記入後に検証します。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
@@ -57,71 +43,63 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -Result tmp_provider_comparison/bridge.jsonl
 ```
 
-The validator rejects rows whose `corpus_id` is unknown, whose `reading` or
-`committed_text` differs from the corpus, whose backend name is unsupported, or
-whose `fallback_used=true` has no `fallback_source`. This is the privacy guard:
-backend outputs may be recorded, but the inputs under evaluation must remain
-the checked-in corpus inputs. Native rows must also include
-`native_backend=mozc_server_client`, non-empty `protocol_source`, non-empty
-`mozc_commit`, non-empty `mozc_build_artifact`, and explicit fallback fields.
+検証ツールは、次の行を拒否します。
 
-For Phase 2A / 2B artifact smoke, `tools/mozc_native_probe/Invoke-MozcNativeProbe.ps1`
-can generate native records from the checked-in manifest and corpus without
-downloading, building, or installing Mozc. When no artifact exists, the expected
-result is an explicit unavailable error with `fallback_used=false` and
-`segment_source=unavailable`.
+- 未知の`corpus_id`
+- コーパスと異なる`reading`または`committed_text`
+- 未対応のバックエンド名
+- `fallback_used=true`なのに`fallback_source`がない
 
-## Capture Boundary
+これはプライバシー保護のための境界です。バックエンドの出力は記録できますが、評価入力はリポジトリ内のコーパスから変更できません。
 
-Compare at the provider boundary where possible:
+native行ではさらに、`native_backend=mozc_server_client`、空でない`protocol_source`、`mozc_commit`、`mozc_build_artifact`、明示した代替処理フィールドが必要です。
+
+Phase 2A／2Bの成果物確認では、`tools/mozc_native_probe/Invoke-MozcNativeProbe.ps1`が、Mozcを取得・ビルド・インストールせず、マニフェストとコーパスからnative記録を生成できます。成果物がない場合の期待値は、`fallback_used=false`、`segment_source=unavailable`、成果物利用不能エラーです。
+
+## 取得する境界
+
+可能な限りプロバイダー境界で比較します。
 
 - `CandidateList.entries`
 - `CandidateList.segments`
 - `CandidateList.error`
-- `pending` / `requestId`
+- `pending`／`requestId`
 
-If using the current app UI instead of a harness, capture the same information
-manually from the candidate window, debug output, and bridge CLI output.
+ツールではなく実際のUIを使う場合も、候補ウィンドウ、デバッグ出力、Bridge CLIから同じ情報を手動で記録します。
 
-## Bridge Provenance Caveat
+## Bridgeの由来に関する注意
 
-`mozc_bridge.exe` can print `DBG` lines such as segment source and segment
-reason for standalone diagnosis. The in-DLL `MozcBridgeTransport` does not parse
-that text protocol: it receives candidates and segment structures directly from
-`QueryCandidatesInProcess()`. If additional fallback/source provenance matters,
-collect it from the standalone CLI or extend the structured bridge response
-explicitly.
+単体の`mozc_bridge.exe`は、文節取得元と理由を`DBG`行へ出力できます。DLL内の`MozcBridgeTransport`はこのテキストを解析せず、`QueryCandidatesInProcess()`から候補と文節構造を直接受け取ります。
 
-## Per-Backend Steps
+追加の代替処理・取得元情報が必要な場合は、単体CLIから収集するか、Bridgeの構造化応答を明示的に拡張します。
 
-Backend configuration matrix:
+## バックエンド別の設定
 
-| Backend record | Required config shape | Expected state |
+| 記録名 | 必要な設定 | 期待する状態 |
 | --- | --- | --- |
-| `bridge` | `provider.kana.mode = "mozc"` and `provider.kana.mozc.transport = "bridge"` | Public-snapshot default; the DLL calls the compiled-in bridge implementation. |
-| `server` | `provider.kana.mode = "mozc"` and `provider.kana.mozc.transport = "server"` | Legacy alias only; expected to behave as `bridge`. |
-| `imm32` | `provider.kana.mode = "mozc"` and `provider.kana.mozc.transport = "imm32"` | Experimental comparison path; live testing returned no candidates on the submission machine. |
-| `dictionary` | `provider.kana.mode = "dictionary"` and dictionary assets enabled/resolved | Prototype backend; not Mozc parity. |
-| `native` | `provider.kana.mode = "mozc"`, `provider.kana.mozc.transport = "native"`, and `provider.kana.mozc.native.backend = "mozc_server_client"` | Opt-in app-local wrapper/server path; unavailable without explicit artifacts. |
+| `bridge` | `kana.mode = "mozc"`、`mozc.transport = "bridge"` | 公開版の既定値。DLL内のBridge実装を呼ぶ。 |
+| `server` | `kana.mode = "mozc"`、`mozc.transport = "server"` | 旧別名。`bridge`と同じ動作を期待する。 |
+| `imm32` | `kana.mode = "mozc"`、`mozc.transport = "imm32"` | 比較・互換経路。提出用PCの実環境では候補を取得できなかった。 |
+| `dictionary` | `kana.mode = "dictionary"`、辞書成果物を有効化 | 試作バックエンド。Mozcと同等ではない。 |
+| `native` | `kana.mode = "mozc"`、`mozc.transport = "native"`、`native.backend = "mozc_server_client"` | 任意のアプリ内経路。明示成果物がなければ利用不能。 |
 
-If using the running RTAS config instead of a provider-boundary harness:
+実行中RTASの設定を切り替える場合：
 
-1. Save a local backup of `config/ime_settings.json`.
-2. Set the backend under test.
-3. Restart the RTAS text service so the config is reloaded.
-4. For each corpus row:
-   - enter `reading`.
-   - record top-N Layer1 candidates.
-   - record segment spans and surfaces if available.
-   - record visible or logged provider errors.
-   - record whether fallback was observed.
-   - record cold latency for the first run.
-   - repeat the same input and record warm latency.
-   - for `layer_flow` rows, verify Layer2 and Translation still use the
-     selected source text.
-5. Restore the original config after the run.
+1. `config/ime_settings.json`をローカルへバックアップする。
+2. テスト対象のバックエンドを設定する。
+3. RTASテキストサービスを再起動する。
+4. コーパスの各行について、次を記録する。
+   - `reading`を入力する。
+   - 上位N件のLayer 1候補を記録する。
+   - 利用可能なら文節範囲と表層形を記録する。
+   - 表示またはログに出たプロバイダーエラーを記録する。
+   - 代替処理の有無を記録する。
+   - 最初の実行をコールド遅延として記録する。
+   - 同じ入力を繰り返し、ウォーム遅延を記録する。
+   - `layer_flow`行では、Layer 2とTranslationが選択した文字列を引き継ぐことを確認する。
+5. 終了後に元の設定を戻す。
 
-## Suggested Result Schema
+## 推奨する結果形式
 
 ```json
 {
@@ -160,33 +138,27 @@ If using the running RTAS config instead of a provider-boundary harness:
 }
 ```
 
-The example values above show the shape only. Do not treat them as expected
-outputs.
+上記は構造例で、期待する候補値ではありません。
 
-For native unavailable/spike captures:
+nativeの利用不能・技術検証記録では次を守ります。
 
-- `native_backend` must be `mozc_server_client`.
-- `protocol_source` must name generated Mozc protocol definitions or the
-  typed Mozc API boundary used.
-- `mozc_commit` must record the Mozc source revision or artifact provenance.
-- `mozc_build_artifact` must record the local build artifact root or package
-  identifier.
-- `fallback_used` must be `false` and `fallback_source` must be empty unless a
-  separate explicit fallback-policy test is being reviewed.
+- `native_backend`は`mozc_server_client`。
+- `protocol_source`には生成済みMozcプロトコル、または利用した型付きMozc API境界を記録する。
+- `mozc_commit`にはMozcソースまたは成果物のrevisionを記録する。
+- `mozc_build_artifact`にはローカル成果物ルートまたはパッケージIDを記録する。
+- 別途レビューする代替方針の試験を除き、`fallback_used=false`、`fallback_source`は空にする。
 
-The deliberate unavailable fixture for the current workspace is:
+意図的にコミットした利用不能テストデータ：
 
 - `tests/samples/provider_comparison/native_artifact_unavailable_smoke.jsonl`
 
-## Pass Criteria For This Phase
+## この段階の合格条件
 
-- `bridge` behavior remains unchanged.
-- `imm32` remains available.
-- `dictionary` remains comparable as a prototype backend, not as Mozc parity.
-- No comparison procedure requires private protocol parsing in RTAS.
-- No exact candidate string is hardcoded as the only acceptable result.
-- Native results are accepted only when artifact provenance and runtime fields
-  identify the explicit app-local `mozc_server_client` path.
-- Any fallback is explicit in `fallback_used` and `fallback_source`.
-- Result files pass the JSONL harness validator before they are used for
-  backend decisions.
+- `bridge`の動作が変わらない。
+- `imm32`を選択できる。
+- `dictionary`をMozc同等ではない試作として比較できる。
+- RTAS内で非公開プロトコル解析を追加しなくても比較できる。
+- 1つの候補文字列を唯一の正解として固定しない。
+- native結果は、成果物とruntime情報から明示的な`mozc_server_client`経路を確認できる場合だけ採用する。
+- 代替処理を`fallback_used`と`fallback_source`へ明記する。
+- バックエンド判断に利用する前に、JSONL検証へ合格する。

@@ -1,29 +1,33 @@
-﻿# Requirements (Section 0)
+# 要件
 
-## Mandatory
-- **TSF + IMM32 compatibility**: keep the current `ImmGetConversionListW` + `SendInput` fallback so games (DirectInput) continue to work.
-- **Target title**: prioritise Phantasy Star Universe test operations; behaviour must remain stable in that title.
-- **Kana toggle consistency**: keep TSF compartments (`GUID_COMPARTMENT_KEYBOARD_*`) in sync with physical toggle keys.
-- **Async safety**: ensure `AsyncWorkQueue` tasks cannot freeze the UI; continue using mutex + preview guard semantics.
-- **Fallback insert**: retain the `InsertText` → `SendInput` path when edit sessions fail.
-- **Logging / masking**: user-provided masking rules must be honoured; avoid writing prompts to disk.
-- **Layer cache policy**: Space cycles over cached Layer2/translation entries; Shift+Space forces a re-query. Provide in-memory cache keyed by reading + layer + commit mode.
-- **Translation commit policy**: default behaviour replaces the Japanese sentence with the translation (append mode remains opt-in via settings).
-- **Provider boundary stability**: Layer1 may move between bridge, IMM32, future Mozc native, or internal dictionary backends only through the provider interfaces. Internal dictionary work remains a parallel decoder track until it reaches measured Mozc parity.
+## 必須要件
 
-## Optional
-- **Candidate enrichment**: merge LLM/user-dictionary outputs with base candidates.
-- **Visual tuning**: allow users to configure toast/overlay behaviour (on/off/opacity).
-- **Async parallelism**: add knobs for worker counts and prioritisation.
+- **TSFとIMM32の互換性**：ゲームなどDirectInputを使うアプリでも動かすため、`ImmGetConversionListW`と`SendInput`の互換経路を維持します。
+- **主な検証対象**：Phantasy Star Universeでの動作確認を優先し、同タイトルで安定した挙動を維持します。
+- **かな入力切り替えの一貫性**：TSF compartment（`GUID_COMPARTMENT_KEYBOARD_*`）と物理切り替えキーの状態を一致させます。
+- **非同期処理の安全性**：`AsyncWorkQueue`がUIを停止させないよう、mutexとpreview guardの考え方を維持します。
+- **代替入力**：edit sessionが失敗した場合の`InsertText`→`SendInput`経路を維持します。
+- **ログと機密情報**：利用者が設定したマスキング規則を守り、プロンプトをディスクへ書き出しません。
+- **レイヤーキャッシュ**：Spaceはキャッシュ済みのLayer 2／翻訳候補を順に表示し、Shift+Spaceは再問い合わせします。読み、レイヤー、確定方式をキーとするメモリ上のキャッシュを使います。
+- **翻訳の確定方式**：既定では日本語文を翻訳文へ置換します。追記方式は設定で任意に有効化できます。
+- **プロバイダー境界の安定性**：Layer 1をBridge、IMM32、将来のMozc native、内製辞書の間で切り替える場合、必ずプロバイダーインターフェースを通します。内製辞書は、Mozcと同等の品質を測定できるまで独立した試作デコーダーとして扱います。
 
-## KPIs
-- **Input latency**: ≤ 50 ms from key press to preedit update while in kana mode.
-- **Candidate popup**: ≤ 200 ms for `OpenCandidateUI` with readings up to 10 characters.
-- **Translation turnaround**: ≤ 1.5 s for standard requests; after 3 s show a timeout message.
-- **Error surfacing**: Ollama down/timeouts must display “翻訳不可” and log at WARNING level.
+## 任意要件
 
-## Open items
-- LLM context scope: currently preedit text + most recent committed sentence; adjust later if needed.
-- Title-specific constraints beyond PSU remain unknown; gather data once new titles are targeted.
-- Log retention and rotation policy still undefined (currently DebugLog only).
-- Cache TTL and Shift+Space bindings to be formalised in configuration files.
+- **候補の拡充**：LLMとユーザー辞書の出力を基本候補へ統合する。
+- **表示調整**：toast／overlayの有効・無効や透明度を設定できるようにする。
+- **非同期処理の並列度**：ワーカー数と優先度を設定できるようにする。
+
+## 性能目標
+
+- **入力遅延**：かなモードでのキー入力からpreedit更新まで50 ms以下。
+- **候補表示**：10文字以下の読みについて、`OpenCandidateUI`を200 ms以下で表示する。
+- **翻訳時間**：標準的な要求は1.5秒以下を目標とし、3秒後にはタイムアウトを表示する。
+- **エラー表示**：Ollama停止・タイムアウト時は「翻訳不可」を表示し、WARNINGレベルで記録する。
+
+## 未決定事項
+
+- LLMへ渡す文脈は、現在preeditと直近の確定文です。必要に応じて調整します。
+- PSU以外のゲーム固有制約は未確認です。対象を追加した時点で測定します。
+- ログの保持・ローテーション方針は、DebugLog以外について未確定です。
+- キャッシュの有効期間とShift+Spaceの割り当てを設定ファイル上で正式化する必要があります。

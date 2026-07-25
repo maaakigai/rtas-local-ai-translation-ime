@@ -1,32 +1,37 @@
-# Dictionary-Based Analysis Design
+# 辞書ベース解析の設計案
 
-Related migration note: `docs/dictionary/mozc_native_design_investigation.md`
-compares bridge, native Mozc, and internal dictionary paths before any runtime
-implementation work.
+関連する移行調査は`docs/dictionary/mozc_native_design_investigation.md`を参照してください。実行時実装へ着手する前に、Bridge方式、Mozcネイティブ方式、内製辞書方式を比較しています。
 
-## Goals
-- Replace the LLM-first pipeline with deterministic dictionary lookup while keeping the multi-layer (kana → kanji → translation) interface intact.
-- Maintain compatibility with the TSV artefacts produced by `tools/dict_prep`.
-- Support incremental upgrades (e.g., adding neural rescoring) without rewriting the decoding core.
+> この文書は内製辞書方式の設計案です。現在の公開版では、Layer 1の既定経路にBridge方式を使用します。
 
-## Stage 1: Morphological Segmentation (Viterbi)
+## 目的
 
-### Graph Construction
-- Input: kana string `input` and morph dictionary records (`MorphRecord`).
-- Build a lattice where each node represents `input[i:j)` matched by a dictionary entry or a fallback unknown-token node.
-- Unknown nodes are generated with heuristics (single kana, extended Latin/number runs) and assigned a configurable penalty.
-- Edges connect nodes whose spans touch (i.e., end of the previous node equals start of the next).
+- 多層構成（かな→漢字→翻訳）のインターフェースを維持したまま、LLM中心の処理を決定的な辞書検索へ置き換えられる構造にします。
+- `tools/dict_prep`が生成するTSVと互換性を保ちます。
+- デコード処理の中心を書き直さず、将来ニューラル再ランキングなどを段階的に追加できるようにします。
 
-### Scoring Model
-Total path cost is the sum of:
-1. Word cost from the dictionary (`record.cost`).
-2. Transition cost: `bigram_penalty(prev.pos, current.pos)` looked up from a POS transition table.
-3. Feature bonuses/penalties derived from `record.features` (e.g., favour common conjugations).
-4. Length prior that discourages excessive segmentation.
+## 第1段階：形態素分割（Viterbi）
 
-All terms operate in the same cost space (lower is better). Costs are stored as 32-bit signed integers to match MeCab semantics.
+### グラフ構築
 
-### Pseudocode
+- 入力は、かな文字列`input`と形態素辞書レコード（`MorphRecord`）です。
+- `input[i:j)`に一致する辞書項目、または未知語用の代替ノードを格子状に配置します。
+- 未知語ノードは、1文字のかな、連続する英数字などの規則で生成し、設定可能なペナルティを与えます。
+- 前ノードの終端と次ノードの開始位置が一致する場合に辺を接続します。
+
+### スコアモデル
+
+経路全体のコストは、次の合計です。
+
+1. 辞書に含まれる単語コスト（`record.cost`）
+2. 品詞遷移表から取得する遷移コスト`bigram_penalty(prev.pos, current.pos)`
+3. `record.features`から求める加点・減点（一般的な活用を優先するなど）
+4. 過剰な分割を抑える長さ事前分布
+
+すべて同一のコスト空間で扱い、値が小さいほど良い候補とします。MeCabの意味体系に合わせ、コストは32ビット符号付き整数で保持します。
+
+### 疑似コード
+
 ```pseudo
 function VITERBI_SEGMENT(input, morph_dict, pos_costs):
     lattice = build_lattice(input, morph_dict)
@@ -52,32 +57,36 @@ function VITERBI_SEGMENT(input, morph_dict, pos_costs):
     return path_to_tokens(path, lattice)
 ```
 
-## Stage 2: Layer 2 Conversion (Beam Search)
+## 第2段階：Layer 2変換（ビームサーチ）
 
-### Problem Statement
-- Input: sequence of segmented tokens from Stage 1.
-- Objective: choose kanji or mixed-script forms that maximise fluency while respecting readings and context.
-- Sources: morphological candidates (surface vs. base form) and bilingual dictionary glosses.
+### 課題
 
-### Beam Configuration
-- Beam width: configurable (default 8) to balance latency against accuracy.
-- Hypothesis state:
-  - `position`: index in token list.
-  - `output`: accumulated kanji string.
-  - `score`: sum of costs (lower is better).
-  - `translation_buffer`: candidates for Stage 3 (optional).
-- Expansion options per token:
-  1. Exact dictionary surface form.
-  2. Alternate kanji matched via bilingual entry (e.g., same headword).
-  3. Hiragana fallback (keeps kana when confidence is low).
+- 入力：第1段階で分割したトークン列
+- 目的：読みと文脈を保ちながら、自然さが最大になる漢字または漢字かな混じり表記を選ぶ
+- 候補元：形態素候補（表層形・基本形）と対訳辞書の語釈
 
-### Scoring Components
-- Language model prior (lightweight bigram table or heuristic frequency weighting).
-- Penalty for leaving kana untouched (`kana_penalty`).
-- Bonus for bilingual entries tagged as `common` or high priority.
-- Context compatibility: discourage mixing conflicting POS tags within a window.
+### ビーム設定
 
-### Pseudocode
+- ビーム幅：遅延と精度の均衡を取るため、既定値を8とします。
+- 仮説状態：
+  - `position`：トークン列内の位置
+  - `output`：構築中の漢字かな混じり文字列
+  - `score`：コストの合計（小さいほど良い）
+  - `translation_buffer`：第3段階用の候補（任意）
+- 各トークンの展開候補：
+  1. 辞書の表層形との完全一致
+  2. 対訳辞書から得た別表記の漢字
+  3. 信頼度が低い場合のひらがな維持
+
+### スコア要素
+
+- 軽量なbigram表または頻度規則による言語モデル事前分布
+- かなを変換せず残す場合の`kana_penalty`
+- `common`または高優先度の対訳辞書項目への加点
+- 一定範囲内で矛盾する品詞の混在を避ける文脈整合性
+
+### 疑似コード
+
 ```pseudo
 function BEAM_REWRITE(tokens, morph_dict, bilingual_dict, beam_width):
     beam = priority_queue(order=lowest_score_first)
@@ -105,17 +114,18 @@ function BEAM_REWRITE(tokens, morph_dict, bilingual_dict, beam_width):
     return select_best_candidates()
 ```
 
-### Translation Buffer
-- While expanding the beam, we collect English gloss candidates with priority tags.
-- Stage 3 (final translation selection) can reuse the buffer without re-querying the bilingual dictionary.
+### 翻訳バッファ
 
-## Data Interfaces
-- `MorphDictionary` and `BilingualDictionary` loaders return in-memory indices optimised for repeated lookup.
-- Downstream modules must not mutate dictionary records; they should treat returned pointers as read-only.
-- Decoders accept iterators so we can stream tokens for long inputs in the future.
+ビームを展開しながら、優先度付きの英語語釈候補を収集します。第3段階の最終翻訳選択では、対訳辞書を再検索せずこのバッファを再利用できます。
 
-## Open Questions
-- Need a compact POS transition matrix builder (potentially generated alongside the morph TSV).
-- Evaluate whether heuristics for unknown tokens require katakana-to-kanji guesses or if kana passthrough suffices.
-- Investigate pruning heuristics to keep beam search latency under 5 ms on low-end CPUs.
+## データインターフェース
 
+- `MorphDictionary`と`BilingualDictionary`のローダーは、繰り返し検索に適したメモリ上のインデックスを返します。
+- 後段の処理は辞書レコードを変更せず、返されたポインターを読み取り専用として扱います。
+- 将来長文を逐次処理できるよう、デコーダーはイテレーターを受け取る構成にします。
+
+## 未解決事項
+
+- 形態素TSVと同時生成できる、コンパクトな品詞遷移行列ビルダーが必要です。
+- 未知語処理にカタカナから漢字を推測する規則が必要か、かなをそのまま通すだけで十分かを評価します。
+- 低性能CPUでもビームサーチを5 ms未満に保つ枝刈り方法を調査します。

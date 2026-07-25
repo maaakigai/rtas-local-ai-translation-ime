@@ -1,43 +1,49 @@
-# Dictionary Load Strategy
+# 辞書の読み込み方針
 
-This note captures how the TSV dictionaries produced by `tools/dict_prep/` will be consumed at runtime. It focuses on keeping memory predictable, ensuring we can ship through `regsvr32` registration without bloating the RTAS DLL, and outlining the testing path before the loaders are wired into production code.
+> この文書は、辞書モードを統合するための設計・計画メモです。現在の公開版で既定のかな漢字変換経路はBridge方式です。
 
-## Memory Budget
-- **Target footprint (desktop default)**: ≤ 120 MB resident for UniDic-lite + JMdict common subset combined.
-  - Morphological TSV: ~70 MB (after pruning infrequent POS and costs below -500).
-  - Bilingual TSV: ~45 MB when capped at 5 glosses and `--only-common`.
-  - Index overhead: < 5 MB (vectors of 32-bit indices + unordered_map tables).
-- **Low-memory profile (optional)**: ≤ 32 MB by tightening `--max-entries`, raising `--min-cost`, and using frequency-based gloss pruning. The loader options expose `max_entries` so the caller can enforce this at startup.
-- **Allocation model**:
-  - Loaders reserve capacity before pushing entries to avoid repeated reallocations.
-  - Strings remain `std::string` and share the TSV buffer lifetime; consider interning later if profiling shows pressure.
-  - Feature/variant vectors are shrunk-to-fit after load in the integration step (not yet implemented).
+`tools/dict_prep/`が生成するTSV辞書を実行時に読み込む方法をまとめます。メモリ使用量を予測可能にすること、RTAS DLLを肥大化させずに`regsvr32`による登録方式を維持すること、本番コードへ接続する前の検証手順を定めることが目的です。
 
-## Index Strategy
+## メモリ上限
+
+- **デスクトップ向け既定構成**：UniDic-liteとJMdict一般語サブセットの合計常駐メモリを120 MB以下にします。
+  - 形態素TSV：約70 MB（出現頻度の低い品詞と、コストが-500未満の項目を除外した場合）
+  - 対訳TSV：約45 MB（語釈を最大5件に制限し、`--only-common`を指定した場合）
+  - インデックスのオーバーヘッド：5 MB未満（32ビットのインデックス配列と`unordered_map`テーブル）
+- **省メモリ構成（任意）**：`--max-entries`を厳しくし、`--min-cost`を引き上げ、頻度に基づいて語釈を絞ることで32 MB以下を目標にします。ローダーの`max_entries`オプションにより、呼び出し側が起動時に上限を指定できます。
+- **メモリ確保方式**：
+  - エントリ追加時の再確保を減らすため、ローダーは事前に必要容量を予約します。
+  - 文字列は`std::string`のまま保持し、TSVバッファの生存期間を共有します。計測で負荷が確認された場合は、将来インターン化を検討します。
+  - 統合段階では、読み込み後に特徴量・表記揺れの配列へ`shrink_to_fit`を適用する予定です（未実装）。
+
+## インデックス方針
+
 - `MorphDictionary`
-  - Primary key: exact surface form → vector of record indices.
-  - Secondary: katakana reading → vector of indices (enables IME conversion by reading).
-  - Unknown handling: not in loader scope; decoder will synthesize fallback nodes.
+  - 主キー：完全一致する表層形から、レコード番号の配列を取得します。
+  - 副キー：カタカナ読みから、レコード番号の配列を取得します。IMEが読みから変換するために使います。
+  - 未知語処理：ローダーの対象外です。デコーダーが代替ノードを生成します。
 - `BilingualDictionary`
-  - Headword index for direct lookups.
-  - Kanji and kana indices for reverse search (beam rewrite stage).
-  - Indices store `std::size_t` offsets; vectors are intentionally unsorted to allow stable insertion.
-  - Future extension: maintain a priority score per entry (derived from TSV) to speed up candidate ranking.
+  - 直接検索用の見出し語インデックスを持ちます。
+  - 逆引き（ビーム書き換え段階）用に漢字・かなインデックスを持ちます。
+  - インデックスには`std::size_t`のオフセットを保存します。挿入順を安定させるため、配列は意図的に並べ替えません。
+  - 将来、TSVから算出した優先度を各エントリへ保持し、候補順位の計算を高速化できます。
 
-## Build Integration Plan
-1. **Static library**: add `src/dictionary/*` to a new `Ime3Dictionary.lib` project, keeping it independent of RTAS to allow unit tests without COM host dependencies.
-2. **RTAS hook**: wire the loaders into `rtas_text_service` behind an interface exposed via `docs/api/conversion_provider.md`. Activation occurs only when config specifies `provider = "dictionary"`.
-3. **Unit tests**: introduce `tests/unit/dictionary_loader_tests.cpp` (GoogleTest) exercising TSV samples located under `tests/samples/dictionary/`.
-4. **CI leverage**: extend the existing build scripts to compile the new static library; the RTAS DLL continues to export the same COM objects, so `regsvr32` workflow remains unchanged.
+## ビルド統合計画
 
-## regsvr32 Deployment Alignment
-- RTAS DLL size increase is expected to stay < 1 MB (loader code only). Heavy data assets (`*.tsv`) are not embedded; they ship under `%ProgramFiles%/Ime3/data/`.
-- Registration scripts (`install_rtas_x64.bat`) will copy TSV assets before invoking `regsvr32`, ensuring the COM server can locate them if/when dictionary mode is enabled.
-- No additional registry keys are required; provider selection will be read from `config/ime_settings.json` at runtime.
+1. **静的ライブラリ**：`src/dictionary/*`を新しい`Ime3Dictionary.lib`プロジェクトへ追加します。COMホストに依存せず単体テストできるよう、RTASから分離します。
+2. **RTASとの接続**：`docs/api/conversion_provider.md`のインターフェースを介して、ローダーを`rtas_text_service`へ接続します。設定で`provider = "dictionary"`を指定した場合にだけ有効化します。
+3. **単体テスト**：`tests/samples/dictionary/`のTSVサンプルを使う`tests/unit/dictionary_loader_tests.cpp`（GoogleTest）を追加します。
+4. **CIへの追加**：既存のビルドスクリプトを拡張し、新しい静的ライブラリもコンパイルします。RTAS DLLが公開するCOMオブジェクトは変えないため、`regsvr32`の手順は維持します。
 
-## Integration & Test TODOs
-- [ ] Add build target for `Ime3Dictionary.lib` and include loaders.
-- [ ] Create seeded TSV fixtures (small) and write loader regression tests.
-- [ ] Benchmark load times on representative hardware (< 200 ms target) and update this document with results.
-- [ ] Validate memory footprint using Windows Performance Analyzer after integrating into RTAS.
+## `regsvr32`による配置との整合
 
+- RTAS DLLの増加量は、ローダーコードだけで1 MB未満に収める想定です。容量の大きいデータ（`*.tsv`）は埋め込まず、`%ProgramFiles%/Ime3/data/`へ配置します。
+- 将来辞書モードを有効化する場合、登録スクリプト（`install_rtas_x64.bat`）は`regsvr32`を呼ぶ前にTSVをコピーし、COMサーバーがデータを見つけられるようにします。
+- レジストリキーは追加しません。プロバイダーの選択は実行時に`config/ime_settings.json`から読み込みます。
+
+## 統合・テストの未完了項目
+
+- [ ] `Ime3Dictionary.lib`のビルドターゲットを追加し、ローダーを組み込む。
+- [ ] 固定内容の小さなTSVテストデータを作り、ローダーの回帰テストを書く。
+- [ ] 代表的なPCで読み込み時間を計測し（目標200 ms未満）、結果をこの文書へ追記する。
+- [ ] RTASへ統合後、Windows Performance Analyzerでメモリ使用量を確認する。

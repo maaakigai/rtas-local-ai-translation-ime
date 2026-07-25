@@ -1,45 +1,30 @@
-# LLM data-handling policy (current prototype)
+# LLMのデータ取扱方針（現在の試作版）
 
-This document describes the behavior of the checked-in implementation. It is
-not a claim that unimplemented privacy controls already exist.
+この文書は、リポジトリに含まれる現在の実装がどのように動くかを説明します。未実装のプライバシー保護機能がすでに存在するという主張ではありません。
 
-## Network boundary
+## ネットワーク境界
 
-- The checked-in Ollama host is `127.0.0.1:11434`.
-- `IME3_OLLAMA_HOST`, `IME3_OLLAMA_PORT`, and the JSON settings can redirect
-  requests to another Ollama-compatible endpoint.
-- If a non-loopback endpoint is configured, input text leaves the local
-  process and the operator must review that endpoint's transport security,
-  retention, access control, and terms.
-- Plain HTTP is appropriate only for the loopback default. A remote endpoint
-  should not be used until TLS and authentication have been designed.
+- 公開設定のOllamaホストは`127.0.0.1:11434`です。
+- `IME3_OLLAMA_HOST`、`IME3_OLLAMA_PORT`、JSON設定によって、別のOllama互換エンドポイントへ変更できます。
+- loopback以外の接続先を設定すると、入力文はローカルプロセスの外へ送信されます。利用者は、その接続先の通信保護、保存方針、アクセス制御、利用条件を確認する必要があります。
+- 平文HTTPを利用してよいのは、既定のloopback接続だけです。TLSと認証を設計するまで、リモート接続先を利用しないでください。
 
-## Input and storage
+## 入力と保存
 
-- The text needed for paraphrasing or translation is sent in the Ollama
-  request body.
-- Candidate caches are bounded, in-memory process state; they are not written
-  as a translation-history database.
-- The prototype does not currently implement automatic masking of email
-  addresses, phone numbers, usernames, or other sensitive text. Users should
-  not enter confidential material, especially when a non-loopback host is
-  configured.
+- 言い換えまたは翻訳に必要な文字列を、Ollamaへのリクエスト本文として送信します。
+- 候補キャッシュは件数制限のあるプロセスメモリ上の状態で、翻訳履歴データベースとしてファイルへ保存しません。
+- 現在の試作版には、メールアドレス、電話番号、ユーザー名、その他の機密情報を自動で伏せる処理はありません。特にloopback以外のホストを設定している場合、機密情報を入力しないでください。
 
-## Logging
+## ログ
 
-- File debug logging is disabled in the checked-in configuration.
-- If explicitly enabled, the configured log is size-bounded and rotated by
-  the project logging helper.
-- Current Ollama timing logs contain operation/model/timing or error
-  information, not the prompt or generated response body.
-- This boundary must remain covered by code review when logging changes.
+- 公開設定では、ファイルへのデバッグログ出力を無効にしています。
+- 明示的に有効化した場合、プロジェクトのログ補助処理がファイルサイズを制限し、ローテーションします。
+- 現在のOllama計測ログには、処理名、モデル名、所要時間、またはエラー情報を記録します。プロンプトと生成された応答本文は記録しません。
+- ログ処理を変更するときは、この境界をコードレビューで確認します。
 
-## Planned hardening
+## 本番利用前に必要な改善
 
-Before treating RTAS as a production input method:
-
-- reject non-loopback hosts unless TLS and explicit user consent are enabled;
-- add an optional, tested sensitive-token masking layer;
-- add tests proving prompts and responses do not enter logs; and
-- document cache clearing and process-lifetime behavior with integration
-  evidence.
+- TLSと利用者の明示同意がない場合、loopback以外のホストを拒否する。
+- 任意で有効化でき、テスト済みの機密トークン除去処理を追加する。
+- プロンプトと応答がログへ入らないことをテストで証明する。
+- キャッシュの消去方法とプロセス終了までの保持動作を、統合試験の結果とともに文書化する。

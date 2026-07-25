@@ -1,8 +1,6 @@
-# ConversionProvider interface
+# `ConversionProvider`インターフェース
 
-`IConversionProvider` separates the TSF text service and candidate UI from the
-active conversion backend. The authoritative declarations are in
-`src/api/conversion_provider.h`.
+`IConversionProvider`は、TSFテキストサービスおよび候補UIを、実際に使用する変換バックエンドから分離するためのインターフェースです。正式な宣言は`src/api/conversion_provider.h`にあります。
 
 ```cpp
 struct LayerRequestContext {
@@ -38,36 +36,22 @@ public:
 };
 ```
 
-## Responsibilities
+## 責務
 
-- `TextService` supplies the reading, committed text, target layer, and
-  asynchronous-execution preference.
-- Layer 1 returns kana-kanji candidates from the selected Japanese conversion
-  backend.
-- Layer 2 returns Japanese paraphrase candidates when the provider supports
-  them.
-- Translation returns English candidates for the selected Japanese text.
-- `segments` carries optional backend-provided segmentation metadata.
-- A provider that cannot complete synchronously returns `pending=true` and a
-  `requestId`, then delivers the final `CandidateList` through
-  `ProviderCallback`.
+- `TextService`は、読み、確定済み文字列、対象レイヤー、非同期実行を許可するかどうかを渡します。
+- Layer 1は、選択した日本語変換バックエンドからかな漢字変換候補を返します。
+- Layer 2は、対応するプロバイダーの場合に日本語の言い換え候補を返します。
+- Translationは、選択した日本語文に対する英訳候補を返します。
+- `segments`には、バックエンドが提供する任意の文節情報を格納します。
+- 同期的に完了できないプロバイダーは、`pending=true`と`requestId`を返し、完了後に`ProviderCallback`を通じて最終的な`CandidateList`を通知します。
 
-## Result and cancellation contract
+## 結果とキャンセルの契約
 
-- `requestId` lets the UI reject a stale response after the user changes text,
-  switches layers, or cancels a request.
-- `Cancel(requestId)` requests cancellation; consumers must still treat any
-  late callback as stale.
-- An empty `entries` list with `pending=false` is a completed result with no
-  candidates. Providers should put a user-displayable diagnostic in `error`
-  when the empty result represents a failure.
-- Provider capability checks must happen through `GetCapabilities()` instead
-  of assuming every backend implements every layer.
+- UIは`requestId`を使い、入力変更、レイヤー切り替え、キャンセルより前の古い応答を破棄できます。
+- `Cancel(requestId)`は処理の中止を要求します。ただし、中止後に届いたコールバックも呼び出し側で古い応答として扱う必要があります。
+- `pending=false`かつ`entries`が空の場合は、「処理は完了したが候補がない」ことを表します。失敗によって候補が空になった場合、プロバイダーはユーザー向けの診断情報を`error`へ設定します。
+- すべてのバックエンドが全レイヤーを実装しているとは限らないため、対応機能は`GetCapabilities()`で確認します。
 
-## Current implementation boundary
+## 現在の実装範囲
 
-The checked-in public default uses the bridge transport for Layer 1 and the LLM
-provider for Layer 2 and Translation. The IMM32 and native Mozc transports are
-opt-in research paths. Backend selection is handled by
-`src/provider/conversion_provider_factory.cpp`; UI code should not depend on a
-backend-specific executable or protocol.
+公開版の既定構成では、Layer 1にBridge方式、Layer 2とTranslationにLLMプロバイダーを使用します。IMM32方式とMozcネイティブ方式は、明示的に選択する調査・試験用の経路です。バックエンドの選択は`src/provider/conversion_provider_factory.cpp`が担当し、UIコードは特定バックエンドの実行ファイルや通信プロトコルへ依存しません。

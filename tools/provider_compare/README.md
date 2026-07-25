@@ -1,12 +1,10 @@
-# Provider Comparison Harness
+# プロバイダー比較ツール
 
-`New-ProviderComparisonRun.ps1` prepares and validates JSONL captures for
-comparing RTAS kana-kanji backends while `transport=native` remains opt-in.
+`New-ProviderComparisonRun.ps1`は、`transport=native`を任意機能として維持したまま、RTASのかな漢字変換バックエンドを比較するJSONLを作成・検証します。
 
-It does not mutate `config/ime_settings.json`. Inputs are limited to
-`tests/samples/provider_comparison/phase0_cases.tsv`.
+`config/ime_settings.json`は変更しません。入力は`tests/samples/provider_comparison/phase0_cases.tsv`だけに限定します。
 
-## Create Capture Template
+## テンプレートを作る
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
@@ -16,16 +14,15 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -Output tmp_provider_comparison/bridge.jsonl
 ```
 
-Backends:
+対応バックエンド：
 
 - `bridge`
-- `server` legacy alias; effective transport is `bridge`
+- `server`：実際のtransportが`bridge`になる旧別名
 - `imm32`
 - `dictionary`
-- `native` Phase 3 app-local `mozc_server_client` runtime shape; no fake
-  candidates and no silent fallback
+- `native`：Phase 3のアプリ内`mozc_server_client`形式。偽の候補と暗黙の代替処理を使わない
 
-## Validate Capture
+## 結果を検証する
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
@@ -34,13 +31,15 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -Result tmp_provider_comparison/bridge.jsonl
 ```
 
-Validation checks that each row points to a known corpus id, uses the exact
-corpus reading/committed text, uses an allowed backend name, and records a
-fallback source when fallback is marked as used. Fallback sources are limited to
-`bridge`, `imm32`, and `dictionary`.
+各行について、次を確認します。
 
-Native records are stricter. For the Phase 3 app-local server/client spike they
-must use:
+- 既知のcorpus IDを使っている。
+- コーパスと同じ読み・確定文を使っている。
+- 対応バックエンド名を使っている。
+- `fallback_used=true`の場合に`fallback_source`がある。
+- `fallback_source`は`bridge`、`imm32`、`dictionary`のいずれかである。
+
+Phase 3のアプリ内サーバー／クライアントを表すnative記録には、次が必要です。
 
 ```json
 {
@@ -61,20 +60,16 @@ must use:
 }
 ```
 
-`protocol_source` must describe generated Mozc protocol types or the OSS Mozc
-client/session boundary. It must not refer to Google Japanese Input private
-named pipes, hand-coded protobuf field numbers, or private protocol scraping.
+`protocol_source`には、生成済みMozcプロトコル型またはOSS Mozcクライアント／セッション境界を記録します。Google日本語入力の非公開named pipe、手書きprotobuf番号、非公開プロトコル解析は指定できません。
 
-For the first `mozc_server_client` proof, use the artifact/protocol manifest
-shape documented in:
+最初の`mozc_server_client`確認：
 
 - `docs/dictionary/mozc_server_client_connection_plan.md`
 - `docs/dictionary/mozc_native_artifact_protocol_smoke.md`
 - `tests/samples/provider_comparison/mozc_native_artifact_manifest.example.json`
 - `tests/samples/provider_comparison/native_artifact_server_start_smoke.jsonl`
 
-The non-invasive native probe can create a compatible artifact smoke file
-without installing Mozc or changing system-wide IME state:
+Mozcのインストールやシステム全体のIME変更をせず、互換形式の成果物確認を生成できます。
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass `
@@ -83,11 +78,6 @@ powershell -NoProfile -ExecutionPolicy Bypass `
   -Output tmp_provider_comparison/native_artifact_server_start_smoke.jsonl
 ```
 
-Nested fields such as `artifact_probe`, `server_probe`,
-`server_start_smoke`, `session_lifecycle`, `candidate_extraction`, and
-`segment_extraction` are accepted as extra smoke metadata. The validator still
-enforces the core native provenance fields listed above.
+`artifact_probe`、`server_probe`、`server_start_smoke`、`session_lifecycle`、`candidate_extraction`、`segment_extraction`などの入れ子フィールドは、追加の検証情報として受け付けます。中心となるnativeの由来フィールドは引き続き必須です。
 
-Ordinary captures should stay under `tmp_provider_comparison/` or another
-ignored local directory. Commit a result file only when it is intentionally
-reviewed as a baseline fixture.
+通常の結果は`tmp_provider_comparison/`などの無視対象ローカルディレクトリへ保存してください。基準データとして意図的にレビューした結果だけをコミットします。

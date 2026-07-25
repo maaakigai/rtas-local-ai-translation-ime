@@ -1,11 +1,15 @@
-# Third-party notices
+# 第三者ソフトウェアに関する通知
 
 ## nlohmann/json
 
-This repository includes nlohmann/json 3.11.3 as a single header at
-`third_party/nlohmann/json.hpp`.
+このリポジトリは、nlohmann/json 3.11.3を単一ヘッダー形式で
+`third_party/nlohmann/json.hpp`に同梱しています。
 
 Copyright © 2013-2023 Niels Lohmann
+
+適用ライセンスはMIT Licenseです。以下の英語原文を正式なライセンス文として保持します。
+
+### MIT License原文
 
 Permission is hereby granted, free of charge, to any person obtaining a copy of
 this software and associated documentation files (the "Software"), to deal in
@@ -25,13 +29,14 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-Upstream: https://github.com/nlohmann/json
+配布元：https://github.com/nlohmann/json
 
-## External software and data
+## 外部ソフトウェアとデータ
 
-Google Japanese Input, Ollama, and locally selected Ollama models are external
-runtime prerequisites and are not copied into this repository. Dictionary
-preparation scripts can process separately obtained corpora, but the public
-portfolio snapshot includes only contributor-authored sample TSV rows. Anyone
-generating or redistributing a corpus must review and preserve that corpus's
-own license and attribution requirements.
+Google日本語入力、Ollama、利用者がローカルで選択するOllamaモデルは、
+実行時に別途必要となる外部ソフトウェアです。このリポジトリには複製していません。
+
+辞書準備スクリプトは、利用者が別途入手したコーパスを処理できます。ただし、
+公開ポートフォリオのスナップショットに含めているのは、作者が作成した
+サンプルTSV行だけです。コーパスを生成または再配布する場合は、そのコーパス固有の
+ライセンスと帰属表示条件を確認し、必要な表示を維持してください。

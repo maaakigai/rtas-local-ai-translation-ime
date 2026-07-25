@@ -1,70 +1,45 @@
-# Mozc Native Phase 0 / Phase 1 Plan
+# Mozc native Phase 0／Phase 1計画
 
-Date: 2026-05-19
-Scope: preserve all current RTAS behavior while preparing for a future
-`transport=native` implementation. Phase 1 now includes the typed Mozc
-transport parser and validation layer, but not the native conversion engine.
+- 作成日：2026-05-19
+- 対象：現在のRTASの動作を保ちながら、将来の`transport=native`実装へ備える
 
-> Historical decision record: this phase plan predates the 2026-07-25 public
-> snapshot work. A temporary hardening change selected `transport=imm32`, but
-> live testing returned no candidates. The checked-in default therefore
-> restores `transport=bridge` to preserve the original portfolio behavior.
-> Later Phase 3 work implemented the opt-in app-local wrapper/server runtime;
-> external Mozc build artifacts are intentionally not bundled here.
+Phase 1には型付きMozc transportの解析・検証層を含みますが、native変換エンジンの完成を意味しません。
 
-## Decision
+> 履歴上の注意：2026-07-25に公開版の既定値を一時的に`transport=imm32`へ変更しましたが、実環境では候補を取得できませんでした。元のポートフォリオ動作を保つため、現在の既定値は`transport=bridge`です。その後、Phase 3で明示設定したアプリ内ラッパー／サーバーを使う経路を実装しました。外部Mozcビルド成果物は意図的に同梱していません。
 
-Do not implement the native conversion engine in this phase. The completed
-Phase 1 step is the typed transport contract, the evaluation corpus, and the
-gate that a future implementation must pass before it can become a default
-backend.
+## 判断
 
-This avoids a false native implementation that only moves the current bridge
-workarounds into the RTAS DLL.
+この段階ではnative変換エンジンを既定化しません。Phase 1で整備したのは、型付きtransport契約、評価コーパス、将来の実装が既定化前に通過すべき条件です。
 
-## Feature Preservation Contract
+現在のBridge方式にある回避処理をRTAS DLLへ移しただけの「見せかけのnative実装」は行いません。
 
-The following existing behavior must remain unchanged during Phase 0 / Phase 1:
+## 維持する機能
 
-- `transport=bridge` is the active configured path.
-- `transport=imm32` remains available only for explicit comparison testing.
-- `transport=native` is not the default.
-- Layer1 still enters through `IConversionProvider::FetchLayer1`.
-- Layer2 still enters through `IConversionProvider::FetchLayer2`.
-- Translation still enters through `IConversionProvider::FetchTranslation`.
-- Candidate UI, cached Space cycling, Shift+Space refresh, pending placeholders,
-  and translation commit policy remain provider-agnostic.
-- TextService must not gain native-specific UI branches.
-- The Google Japanese Input private named pipe protocol must not be moved into
-  RTAS proper.
+Phase 0／Phase 1では、次の挙動を変えません。
 
-## Typed Transport Model
+- `transport=bridge`を公開版の既定経路とする。
+- `transport=imm32`は明示的な比較・互換試験で利用できる。
+- `transport=native`を既定にしない。
+- Layer 1／Layer 2／Translationは、それぞれ`IConversionProvider`の`FetchLayer1`／`FetchLayer2`／`FetchTranslation`を通る。
+- 候補UI、Spaceでのキャッシュ順送り、Shift+Spaceでの再取得、処理中表示、翻訳確定方式をバックエンドから独立させる。
+- TextServiceへnative固有のUI分岐を追加しない。
+- Google日本語入力の非公開named pipe処理をRTAS本体へ移さない。
 
-The JSON config still stores `provider.kana.mozc.transport` as a string for
-backward compatibility, but `src/config/provider_settings.*` parses it into a
-typed `MozcTransport` value. Unsupported strings are preserved for diagnostics
-and marked invalid instead of being silently downgraded.
+## 型付きtransport
 
-| Config value | Type value | Current runtime state | Notes |
+後方互換性のため、JSONの`provider.kana.mozc.transport`は文字列のまま保存します。`src/config/provider_settings.*`がこれを型付き`MozcTransport`へ解析し、未対応の文字列は暗黙に置換せず、診断用に元の値を保った設定エラーとします。
+
+| 設定値 | 型 | 現在の状態 | 補足 |
 | --- | --- | --- | --- |
-| `bridge` | `MozcTransport::kBridge` | Public snapshot default | Calls the bridge implementation compiled into the DLL; a standalone diagnostic CLI is also built. |
-| `server` | `MozcTransport::kBridge` | Supported legacy alias | Kept only for backward compatibility. |
-| `imm32` | `MozcTransport::kImm32` | Experimental comparison path | Direct IMM32 candidate path; live testing returned no candidates on the submission machine. |
-| `native` | `MozcTransport::kNative` | Phase 3 app-local `mozc_server_client` runtime path | Must stay opt-in and non-default until the native gate passes. |
-| unsupported string | `MozcTransport::kInvalid` | Configuration error | Does not fall back to `imm32`, `bridge`, or `llm`. |
+| `bridge` | `MozcTransport::kBridge` | 公開版の既定値 | DLLへ組み込んだBridge実装を呼ぶ。単体の診断CLIもビルドできる。 |
+| `server` | `MozcTransport::kBridge` | 旧別名 | 後方互換性のためだけに維持する。 |
+| `imm32` | `MozcTransport::kImm32` | 比較・互換経路 | IMM32から直接候補を取得する。提出用PCの実環境では候補を取得できなかった。 |
+| `native` | `MozcTransport::kNative` | Phase 3の任意経路 | アプリ内`mozc_server_client`経路。評価条件を満たすまで既定にしない。 |
+| 未対応文字列 | `MozcTransport::kInvalid` | 設定エラー | `imm32`、`bridge`、`llm`へ暗黙に切り替えない。 |
 
-Unsupported values must be configuration errors. They must not silently become
-`imm32`, `bridge`, or `llm`.
+現在の`transport=native`は、常に利用不能なstubではありません。明示したアプリ内ラッパー／サーバーが存在する場合だけ初期化します。成果物不足、起動失敗、変換失敗、timeoutを可視のエラーとして返し、別途設計・記録した試験を除いて代替処理を使いません。
 
-`transport=native` is no longer a fake or always-unavailable path. Phase 3
-initializes only when explicit app-local wrapper/server paths are configured
-and present. Missing artifacts, failed startup, failed conversion, and timeout
-remain visible errors, and no fallback is used unless a later explicit fallback
-test is designed and recorded.
-
-### Future Native Config Shape
-
-The native block is consumed by the Phase 3 app-local server/client runtime:
+### native設定例
 
 ```json
 {
@@ -90,84 +65,61 @@ The native block is consumed by the Phase 3 app-local server/client runtime:
 }
 ```
 
-Planned native value domains:
-
-| Field | Allowed values | Rule |
+| フィールド | 値 | 規則 |
 | --- | --- | --- |
-| `native.backend` | `mozc_server_client`, `linked_converter` | Required once `transport=native` is implemented. `mozc_server_client` is the first spike candidate. |
-| `native.root` | install-root-relative or absolute path | No hardcoded Program Files path. |
-| `native.mozc_build_artifact` | install-root-relative or absolute path | Records the pinned Mozc server/client artifact provenance for evaluation. |
-| `native.wrapper_exe` | install-root-relative or absolute path | Thin OSS Mozc client wrapper; required for Phase 3 runtime initialization. |
-| `native.server_exe` | install-root-relative or absolute path | App-local `mozc_server.exe`; required for Phase 3 runtime initialization. |
-| `native.timeout_ms` | positive integer | Wrapper process and Mozc IPC timeout. |
-| `native.top_n` | positive integer | Maximum native candidates to request from the wrapper. |
-| `native.fallback_policy` | `none`, `imm32`, `bridge` | Default must be `none`. Fallback must be visible and logged. |
+| `native.backend` | `mozc_server_client`、`linked_converter` | `mozc_server_client`を最初の検証候補とする。 |
+| `native.root` | インストールルート相対または絶対パス | `Program Files`の固定パスを使わない。 |
+| `native.mozc_build_artifact` | 相対または絶対パス | 評価に使う固定Mozc成果物の由来を示す。 |
+| `native.wrapper_exe` | 相対または絶対パス | Phase 3の初期化に必要な薄いOSS Mozcクライアントラッパー。 |
+| `native.server_exe` | 相対または絶対パス | Phase 3の初期化に必要なアプリ内`mozc_server.exe`。 |
+| `native.timeout_ms` | 正の整数 | ラッパープロセスとMozc IPCのtimeout。 |
+| `native.top_n` | 正の整数 | ラッパーへ要求する候補の最大件数。 |
+| `native.fallback_policy` | `none`、`imm32`、`bridge` | 既定は`none`。利用した場合は表示・記録する。 |
 
-Future native-only fields such as `native.trace` should be added only when code
-consumes them in the same change. `native.trace` must remain off by default and
-must not persist user input unless a later privacy design permits it.
+`native.trace`などの設定は、同じ変更内のコードが実際に利用する場合だけ追加します。traceは既定で無効とし、後のプライバシー設計で許可しない限り入力文を保存しません。
 
-Do not make this block the checked-in default. It is valid only for opt-in
-spike/testing configs until native passes the implementation gate.
+この設定例を公開版の既定値にはしません。nativeが実装・評価条件を満たすまで、任意の技術検証設定としてだけ利用します。
 
-## Evaluation Corpus
+## 評価コーパス
 
-The Phase 0 corpus lives at:
+Phase 0の入力：
 
 - `tests/samples/provider_comparison/phase0_cases.tsv`
 
-The corpus intentionally stores inputs and coverage notes, not fixed expected
-candidate strings. Candidate quality must be compared across backends instead
-of hardcoding a single "correct" output.
+固定した「正解候補」は保存せず、入力と確認観点だけを記録します。候補品質は、特定の出力を正解として埋め込むのではなく、複数バックエンド間で比較します。
 
-Required coverage:
+対象：
 
-- short words.
-- clauses.
-- particle-heavy sentences.
-- proper nouns.
-- unknown words.
-- mixed numbers and Latin text.
-- longer sentences.
-- punctuation and delimiter cases.
+- 短い単語
+- 節
+- 助詞を多く含む文
+- 固有名詞
+- 未知語
+- 数字と英字の混在
+- 長文
+- 句読点と区切り文字
 
-## Comparison Procedure
+## 比較手順
 
-Detailed manual procedure:
+詳細：
 
 - `tests/manual/provider_comparison_phase0.md`
 
-JSONL template and validation harness:
+JSONLテンプレートと検証ツール：
 
 - `tools/provider_compare/New-ProviderComparisonRun.ps1`
 
-The harness creates capture records from the checked-in corpus and validates
-that completed result files do not introduce non-corpus input. Store ordinary
-comparison runs under `tmp_provider_comparison/` or another ignored/local
-directory unless a baseline fixture is deliberately reviewed for commit.
+通常の比較結果は`tmp_provider_comparison/`などの無視対象ローカルディレクトリへ保存します。人が確認して基準ファイルとして採用する場合だけコミットします。
 
-For each corpus row and backend under test:
+各入力・バックエンドで次を行います。
 
-1. Configure the backend:
-   - `provider.kana.mozc.transport = "bridge"`
-   - `provider.kana.mozc.transport = "imm32"`
-   - `provider.kana.mode = "dictionary"`
-   - future: `provider.kana.mozc.transport = "native"`
-2. Restart the RTAS text service so config is reloaded.
-3. Input the row's `reading`.
-4. Capture:
-   - top-N Layer1 candidates.
-   - segment spans and segment surfaces, if present.
-   - provider error text.
-   - whether fallback was used.
-   - cold latency.
-   - warm latency.
-   - whether Layer2 can use the selected Layer1 result.
-   - whether Translation can use the selected Layer2 or Layer1 result.
-5. Record observations in JSONL outside the source tree unless
-   it is being added as a deliberate baseline review fixture.
+1. `bridge`、`imm32`、`dictionary`、または将来の`native`を設定する。
+2. RTASテキストサービスを再起動して設定を読み直す。
+3. `reading`を入力する。
+4. 上位N件のLayer 1候補、文節、エラー、代替処理の有無、コールド／ウォーム遅延、Layer 2とTranslationの接続結果を記録する。
+5. 明示的に基準データへ採用する場合を除き、結果をソースツリー外へ保存する。
 
-Recommended result schema:
+推奨する結果形式：
 
 ```json
 {
@@ -187,105 +139,61 @@ Recommended result schema:
 }
 ```
 
-## Native Implementation Gate
+## native実装の合格条件
 
-`transport=native` must not become the default until all of these are true:
+`transport=native`を既定にする前に、すべて満たす必要があります。
 
-- It uses a typed Mozc API or generated Mozc protocol definitions.
-- It does not use Google Japanese Input private named pipes.
-- It does not manually encode protobuf field numbers.
-- It does not hardcode install paths, pipe names, KLIDs, or scoring constants.
-- Invalid transport values fail validation visibly.
-- Fallback policy is explicit, off by default, and observable.
-- It returns ordered candidates through the same `CandidateList` contract as
-  existing providers.
-- It returns authoritative segment metadata, or clearly reports that segment
-  metadata is unavailable.
-- Candidate popup latency meets the RTAS KPI for readings up to 10 characters.
-- The evaluation corpus shows no regression in existing bridge behavior.
-- Layer2 and Translation flows continue to work without TextService
-  native-specific branches.
-- `bridge` and `imm32` remain available.
+- 型付きMozc APIまたは生成済みMozcプロトコルを使う。
+- Google日本語入力の非公開named pipeを使わない。
+- protobufフィールド番号を手書きしない。
+- インストールパス、pipe名、KLID、スコア定数を固定しない。
+- 不正なtransport値を可視のエラーにする。
+- 代替方針が明示され、既定で無効で、利用時に確認できる。
+- 既存プロバイダーと同じ`CandidateList`で順序付き候補を返す。
+- 正式な文節情報を返すか、取得不能であることを明示する。
+- 10文字以下の読みで、候補表示の性能目標を満たす。
+- 評価コーパスでBridge方式に回帰がない。
+- TextServiceへnative固有の分岐を追加せず、Layer 2とTranslationが動く。
+- `bridge`と`imm32`を引き続き利用できる。
 
-## Default Switch Blockers
+次のいずれかが残る場合、既定にしません。
 
-Do not make native the default if any of these remain true:
+- 一般語でBridgeより候補品質が低い。
+- 暗黙に代替処理へ切り替わる。
+- 固定したローカルインストールパスが必要。
+- 再現できるMozcビルド・依存物の説明がない。
+- 初期化・実行時エラーを利用者へ示せない。
+- 候補UIまたはTextServiceの特例が必要。
+- 文節情報をバックエンドから取得せず推測している。
 
-- Native has lower candidate quality than bridge on common corpus rows.
-- Native falls back silently.
-- Native requires hardcoded local installation paths.
-- Native lacks a reproducible Mozc build/dependency story.
-- Native cannot surface meaningful initialization or runtime errors.
-- Native requires candidate UI or TextService special cases.
-- Native segment metadata is guessed rather than provided by the backend.
+## 実装順序と現在地
 
-## Implementation Sequence
+1. この計画と評価コーパスを維持する。
+2. 完了：JSON文字列を維持したまま、型付き`MozcTransport`を導入する。
+3. 完了：`bridge`、`server`、`imm32`、`native`、不正値の設定検証を追加する。
+4. 完了：Phase 3の`mozc_server_client`が使うアプリ内設定を解析する。
+5. 完了：`bridge`、`server`、`imm32`、`dictionary`、`native`のJSONLテンプレート／検証を追加する。
+6. 一部完了：明示した外部ラッパー／成果物を呼ぶnativeバックエンドを、既存プロバイダー境界の下へ実装した。
+7. 未完了：既定値の変更前に、評価コーパス全体を実測する。
 
-1. Keep this phase document and corpus in place.
-2. Completed: introduce a typed `MozcTransport` enum while keeping the existing
-   `transport` config string as the serialized input.
-3. Completed: add config validation coverage for `bridge`, `server`, `imm32`,
-   `native`, and unsupported values.
-4. Completed for Phase 3: parse native app-local runtime settings consumed by
-   the `mozc_server_client` boundary.
-5. Completed: add a JSONL comparison template/validator for
-   `bridge`, `server`, `imm32`, `dictionary`, and future `native`.
-6. In progress: implement native as an opt-in backend below the provider
-   boundary; current state calls an external wrapper when explicit app-local
-   artifacts are configured.
-7. Run the evaluation corpus before considering any default change.
+## Phase 2以降への引き継ぎ
 
-## Phase 2 Handoff
+最初のnative経路には`mozc_server_client`を推奨し、サーバー方式が性能または文節要件を満たさない場合の第2候補として`linked_converter`を残します。
 
-Phase 2 should start with `mozc_server_client` as the recommended native spike
-route and keep `linked_converter` as a second route if server/client cannot meet
-latency or segment needs. See:
+関連文書：
 
 - `docs/dictionary/mozc_native_backend_options.md`
-
-Before reviewing a native spike:
-
-- pin the Mozc source revision or artifact provenance.
-- record license and third-party attribution requirements.
-- identify the generated Mozc protocol sources or typed API boundary used.
-- extend the provider comparison harness from template/validation into
-  execution for the real native backend.
-- keep fallback disabled by default and observable when enabled.
-- treat native unavailable records as valid only when JSONL includes
-  `native_backend=mozc_server_client`, non-empty `protocol_source`, non-empty
-  `mozc_commit`, non-empty `mozc_build_artifact`, `fallback_used`, and
-  `fallback_source`.
-
-The Phase 2 server/client connection plan is now tracked in:
-
 - `docs/dictionary/mozc_server_client_connection_plan.md`
 - `docs/dictionary/mozc_native_artifact_protocol_smoke.md`
 - `tests/samples/provider_comparison/mozc_native_artifact_manifest.example.json`
 
-That plan defines the initial Mozc source pin, Windows artifact shape,
-license/notices checklist, protocol boundary, session lifecycle, and
-candidate/segment proof requirements. It intentionally does not install Mozc,
-download large dependencies, vendor Mozc `third_party`, or make native the
-default.
+技術検証のレビュー前に、Mozcソース／成果物、ライセンス・第三者表示、使用する生成済みプロトコルまたは型付きAPI境界を記録し、実nativeを実行できるよう比較ツールを拡張します。代替処理は既定で無効にし、有効時に確認できるようにします。
 
-The current Phase 2A / 2B probe and Phase 3 transport support these reviewed
-states:
+現在確認済みの状態：
 
-- artifact absent: explicit unavailable native smoke.
-- artifact present: pinned GitHub Actions MSI, administrative extraction, and
-  `mozc_server.exe` start smoke with session/candidate/segment extraction still
-  marked `not_run_client_wrapper_missing`.
-- local source build present: external `rtas_mozc_client_probe.exe` can use
-  Mozc's official `client::ServerLauncher` with a locally built
-  `bazel-bin/server/mozc_server.exe` to prove session creation, IME-on,
-  conversion, candidates, and preedit segments.
-- RTAS native transport present: `transport=native` can call the configured
-  app-local wrapper/server pair, parse wrapper JSON candidates and preedit
-  segment surfaces, and surface runtime errors without fallback.
+- 成果物がない場合：理由を示すnative利用不能記録を生成できる。
+- 成果物がある場合：固定GitHub Actions MSIを管理展開し、`mozc_server.exe`の起動を確認できる。
+- ローカルビルドがある場合：外部`rtas_mozc_client_probe.exe`がMozc公式`client::ServerLauncher`を使い、セッション作成、IME有効化、変換、候補、preedit文節を確認できる。
+- RTASのnative transport：設定したアプリ内ラッパー／サーバーを呼び、JSON候補とpreedit文節を解析し、代替処理なしで実行時エラーを表示できる。
 
-It does not return fake candidates and keeps `fallback_used=false`.
-
-The client/session wrapper build now requires Visual Studio ATL/MFC to remain
-installed. The next blocker is corpus-level comparison and deciding whether the
-evaluated runtime should be packaged from the local Bazel build, a full MSI
-install context, or another reviewed app-local artifact layout.
+偽の候補は返さず、`fallback_used=false`を維持します。クライアント／セッションラッパーのビルドにはVisual StudioのATL／MFCが必要です。次の課題は評価コーパス全体の比較と、ローカルBazelビルド、完全なMSIインストール環境、確認済みの別アプリ内成果物構成のどれを評価用に採用するかの判断です。

@@ -1,39 +1,37 @@
-﻿# CandidateEntry schema
+# `CandidateEntry`スキーマ
 
 ```json
 {
-  "id": "string",                     // unique inside a layer, e.g. "layer1:0"
-  "layer": "layer1|layer2|translation", // the owning layer
-  "displayText": "string",            // text shown in UI
-  "commitText": "string",             // text applied when committed
-  "reading": "string",                // kana reading (Layer1 keeps it, Layer2/translation mirror the source)
-  "source": "imm32|dict|llm|cache",   // origin enum used by runtime entries
-  "confidence": 0.0,                   // optional 0.0–1.0 score
+  "id": "string",                       // レイヤー内で一意のID（例："layer1:0"）
+  "layer": "layer1|layer2|translation", // この候補を所有するレイヤー
+  "displayText": "string",              // UIに表示する文字列
+  "commitText": "string",               // 確定時に適用する文字列
+  "reading": "string",                  // かな読み（Layer 1は読みを保持し、Layer 2／翻訳は変換元を引き継ぐ）
+  "source": "imm32|dict|llm|cache",     // 実行時エントリで使う生成元の列挙値
+  "confidence": 0.0,                    // 任意の0.0～1.0スコア
   "metadata": {
-    "altVariants": ["string"],        // optional alternative IDs
-    "llmRequestId": 42,                // async tracking id
-    "partial": false,                  // true if it only covers a suffix
-    "lang": "ja|en",                  // language tag where relevant
-    "commitMode": "replace|append",   // how this entry expects to be applied (default replace for translation)
-    "timestamp": "ISO8601"            // optional creation time
+    "altVariants": ["string"],          // 任意の代替候補ID
+    "llmRequestId": 42,                 // 非同期処理の追跡ID
+    "partial": false,                   // 語尾など一部分だけを対象とする場合はtrue
+    "lang": "ja|en",                    // 必要に応じて付ける言語タグ
+    "commitMode": "replace|append",     // 適用方法（翻訳の既定値はreplace）
+    "timestamp": "ISO8601"              // 任意の作成日時
   }
 }
 ```
 
-## Layer-specific notes
-- **layer1**: produced by IMM32/dictionary backends. `commitText` is typically the kanji string; `displayText` may include numbering.
-- **layer2**: paraphrase/extension variants that merge back into Layer1. If only a trailing phrase, set `metadata.partial=true`.
-- **translation**: always represents the final translated string. `metadata.commitMode` defaults to `replace` to reflect that the Japanese sentence will be substituted unless the user switches to append in settings.
+## レイヤー別の補足
 
-## Provider comparison notes
+- **layer1**：かな漢字変換バックエンドが生成します。通常、`commitText`は漢字を含む確定文字列で、`displayText`には番号などの表示用情報を含められます。
+- **layer2**：Layer 1へ戻って統合する言い換え・拡張候補です。末尾の語句だけを表す場合は`metadata.partial=true`を設定します。
+- **translation**：最終的な翻訳文を表します。設定で追記へ切り替えない限り日本語文を置換するため、`metadata.commitMode`の既定値は`replace`です。
 
-The runtime `CandidateSource` enum does not currently distinguish Mozc bridge,
-server alias, or future native; Mozc Layer1 entries still use the existing
-runtime source value. Provider comparison artifacts should therefore record
-backend provenance separately with fields such as `backend`, `transport`,
-`effective_transport`, and `native_backend`.
+## プロバイダー比較時の注意
 
-## Example
+実行時の`CandidateSource`列挙型は、現在のところMozc Bridge、サーバー別名、将来のネイティブ実装を区別しません。MozcによるLayer 1候補にも、既存の実行時ソース値を使用します。そのため、プロバイダー比較結果では、`backend`、`transport`、`effective_transport`、`native_backend`などのフィールドを使って、バックエンドの由来を別途記録します。
+
+## 例
+
 ```json
 [
   {
