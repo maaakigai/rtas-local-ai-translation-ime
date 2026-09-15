@@ -21,6 +21,8 @@
   <ItemGroup>
     <ClCompile Include="dictionary_loader_tests.cpp" />
     <ClCompile Include="conversion_provider_tests.cpp" />
+    <ClCompile Include="candidate_state_tests.cpp" />
+    <ClCompile Include="..\..\src\provider\mozc_conversion_provider.cpp" />
     <ClCompile Include="..\..\src\config\provider_settings.cpp" />
     <ClCompile Include="..\..\src\dictionary\bilingual_loader.cpp" />
     <ClCompile Include="..\..\src\dictionary\morph_loader.cpp" />

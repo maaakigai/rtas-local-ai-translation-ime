@@ -1,38 +1,27 @@
-# `rtas_text_service`のリファクタリング計画
+# TextService のリファクタリング計画
 
-> この文書には完了済みの項目と今後の計画が混在します。個別の状態は本文に明記します。
+## 維持する仕様
 
-## 現在の課題
+Layer1 はかな漢字変換、Layer2 は翻訳用の日本語文章の保持。
+Layer1 の Enter で Layer2 へ進む操作を維持し、TSF / IMM32 / SendInput の互換処理を残す。
+操作の詳細は [state_machine.md](state_machine.md) を参照。
 
-- `TextService`がIMM32互換処理、LLMキュー、overlay、候補UIとの接続をまとめて担当しており、単体テストしにくい状態です。
-- 責務を分離しないままレイヤーを追加すると、`OnKeyDown`がさらに肥大化します。
+## 2026-09-07 の実装
 
-## 提案する構成
+- 既存の `IConversionProvider` 境界を維持。
+- Enter の操作判断とレイヤーの編集状態を `LayerState` へ抽出。
+- 非同期リクエストの受理状態を `CandidateRequest` へ抽出。
+- キャンセル済み応答の適用、別キュー間の ID 重複、キャッシュ表示後の旧応答反映を防止。
+- 呼び出しのない将来用の翻訳受付メソッドと、重複していたリクエスト管理表を削除。
+- 既存の単体テスト実行ファイルに状態・非同期の回帰テストを追加。
 
-1. **`ConversionProvider`抽象化**
-   - `TextService`へ`std::unique_ptr<IConversionProvider> m_provider;`を持たせます。
-   - `BuildCandidates`を`Imm32ConversionProvider`へ移します。これは`ConversionProvider`リファクタリングとして完了済みで、将来の辞書バックエンドに向けた第一段階です。
-2. **`LayerState`管理**
-   - `struct LayerState { enum class Stage { Preedit, Layer1, Layer2, Translation, CommitPending }; ... };`を導入します。
-   - キー処理を`LayerState::HandleKey(event)`へ集約し、状態遷移を宣言的にします。
-3. **非同期結果の配信**
-   - `OnTranslationReady`を、キャッシュと確定方式を理解する`LayerResultDispatcher`へ移します。
-   - `AsyncWorkQueue`へのアクセスを小さなインターフェースで包み、テストしやすくします。
-4. **UI表示層**
-   - `CandidateUI`を`CandidatePresenter`で包み、タブ、badge、ハイコントラスト表示を制御します。
-   - `OverlayController`には生の文字列ではなく、レイヤーbadgeと処理中状態を渡します。
-5. **確定方針**
-   - 翻訳の確定方式（既定は`replace`、任意で`append`）を、プロバイダー結果と設定に含め、UIとTextServiceの動作を一致させます。
+## 次の段階
 
-## 移行手順
+1. 実アプリで Enter / Escape / 継続入力 / 翻訳中の IME 切り替えを確認する。
+2. Space / Backspace / 継続入力の状態判断を、一つずつ既存の回帰テストへ追加して抽出する。
+3. キャッシュの操作が変更を妨げる段階で、その責務を TextService から切り出す。
+4. 通信中の終了待ちと複数アプリでのモデル常駐を計測し、必要なら通信中断や別プロセス化を検討する。
 
-- **Step A**：`IConversionProvider`と、IMM32を使う実装、キャッシュ用の接続点を導入する。
-- **Step B**：`LayerState`を作成して`OnKeyDown`の流れを移し、SpaceとShift+Spaceの差をここへ集約する。
-- **Step C**：LLM連携をプロバイダーへ移し、TextServiceはコールバックを受けて確定方針を適用する。
-- **Step D**：`CandidatePresenter`とoverlay更新を追加し、ハイコントラストのbadge描画へ対応する。
-
-## テスト観点
-
-- 各段階の後に、`tests/samples/multi_stage_inputs.txt`の多層入力シナリオを確認します。
-- プロバイダーを切り替えても`KanaModeCommand`の動作を変えません。
-- `LayerState`の状態遷移、キャッシュ利用、確定方式切り替えに対する単体テストを追加します。
+Presenter や汎用ディスパッチャーの一括導入は行わない。
+翻訳待ち・失敗時の UI 改善は、利用者との次回相談で決める。
+バックエンドの移行は既存の比較ツールで品質・遅延・互換性を測ってから判断する。

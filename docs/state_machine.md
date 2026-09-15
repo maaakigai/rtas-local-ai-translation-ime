@@ -1,53 +1,54 @@
 # 入力・候補選択フロー
 
-次の図は、既定構成で利用者に見える主要な操作経路を示す概念図です。
-候補の巡回、再問い合わせ、非同期処理などの詳細は図から省略しています。
+2026-09-07: Layer1 の Enter で Layer2 へ進む現在の操作を維持する。
+Layer1 はかな漢字変換、Layer2 は変換済み日本語を翻訳用の文章として未確定で保持する。
+既定の Mozc プロバイダーでは Layer2 でかな漢字変換をやり直さない。
 
 ```mermaid
 stateDiagram-v2
-    direction TB
-
-    state "入力中" as Preedit
-    state "日本語候補 (Layer 1)" as Layer1
-    state "言い換え候補 (Layer 2)" as Layer2
-    state "統合後の日本語" as Merged
-    state "翻訳候補" as Translation
-    state "文書へ確定" as Commit
-
-    [*] --> Preedit
+    [*] --> Preedit: Kana input
     Preedit --> Layer1: Space
-    Preedit --> Layer2: Enter
-    Layer1 --> Layer2: Enter
-    Layer2 --> Translation: Space
-    Layer2 --> Commit: Enter（日本語）
-    Layer2 --> Merged: Shift+Enter
-    Merged --> Translation: Space
-    Merged --> Commit: Enter（日本語）
-    Translation --> Commit: Enter（翻訳）
+    Preedit --> Layer2: Enter / hold Japanese
+    Layer1 --> Layer1: Space / select kana-kanji candidate
+    Layer1 --> Layer2: Enter / hold selected Japanese
+    Layer2 --> Translation: Space / translate held Japanese
+    Layer2 --> Commit: Enter / commit Japanese
+    Layer2 --> Layer1Merged: Shift+Enter / continue editing
+    Layer1Merged --> Translation: Space
+    Layer1Merged --> Commit: Enter / commit Japanese
+    Translation --> Translation: Shift+Space / re-query
+    Translation --> Commit: Enter / commit English
+    Translation --> Layer1: Escape / cancel translation
+    Layer2 --> Layer1: Escape / cancel Layer2 request
     Commit --> [*]
 ```
 
-図ではLayer 2と言い換え後の日本語を利用できる既定経路を示しています。
-選択したプロバイダーがLayer 2または翻訳に対応しない場合、その段階は省略されます。
+## 操作上の契約
 
-## 主なキー操作
-
-| 状態 | キー | 動作 |
+| 状態 | キー | 結果 |
 | --- | --- | --- |
-| 入力中 | Space | 日本語候補を開く |
-| 入力中／Layer 1 | Enter | Layer 2へ進む。Layer 2非対応時は日本語を確定する |
-| Layer 1 | Space | 日本語候補を順に選択する |
-| Layer 2 | Space | 選択中の言い換えを翻訳へ渡す。翻訳非対応時は言い換え候補を順に選択する |
-| Layer 2 | Shift+Space | 言い換え候補を再問い合わせする |
-| Layer 2 | Enter | 選択中の言い換えを日本語として確定する |
-| Layer 2 | Shift+Enter | 選択中の言い換えを日本語へ統合し、編集を続ける |
-| 統合後の日本語 | Space／Enter | 翻訳へ進む／日本語として確定する |
-| 翻訳 | Space／Shift+Space／Enter | キャッシュ済み候補を順に選択する／再問い合わせする／翻訳文を確定する |
-| 候補表示中 | Escape | Layer 2・翻訳からLayer 1へ戻る。Layer 1では変換中の文字列を取り消す |
+| 入力中／通常の Layer1 | Enter | 選択した日本語を Layer2 へ渡す。文書へはまだ確定しない |
+| Layer2 | Space | 保持している日本語から翻訳を開始（翻訳が利用可能な場合） |
+| Layer2 | Enter | 保持している日本語を確定 |
+| Layer2 | Shift+Enter | Layer1 へ戻して継続編集 |
+| Layer2 | Shift+Space | Layer2 の候補を再取得 |
+| Layer1 に戻した編集結果 | Enter | 日本語を確定 |
+| Translation | Space | 取得済み翻訳候補を巡回 |
+| Translation | Shift+Space | 翻訳を再問い合わせ |
+| Translation | Enter | 翻訳候補を確定 |
+| Translation | Escape | リクエストを無効化し、Layer1 へ戻る |
+| Layer2 | Escape | リクエストを無効化し、Layer1 へ戻る |
 
-## 実装との対応
+かな漢字変換専用モード、または Layer2 非対応のプロバイダーでは、Layer1 の Enter で日本語を確定する。
+入力中の Enter は TextService のキー処理から Layer2 へ進む。候補 UI が開いているときの Enter の判断は LayerState が担当する。
+Layer2 で翻訳が利用できない場合、Space は取得済みの日本語候補を巡回する。
+Layer1 の Escape は現在の composition と候補 UI を閉じる。
 
-- `CandidateTab`は`Layer1`、`Layer2`、`Translation`の3種類です。
-- 「統合後の日本語」は、Layer 2の選択結果をLayer 1へ戻した`m_layer1Merged`状態です。
-- 「入力中」と「文書へ確定」は、専用の`CandidateTab`ではなく、候補UIやcompositionの有無を含めた概念上の段階です。
-- Layer 2と翻訳の問い合わせは非同期です。処理中は候補UIに待機状態を表示し、完了したrequest IDに対応する結果だけを反映します。
+## 実装境界と検証
+
+- `Ime3/rtas_layer_state.h`: 選択レイヤー、継続編集の状態、Enter の操作判断。
+- `Ime3/rtas_text_service.h`: 判断に従って TSF のプレビュー・確定・候補表示を実行する。
+- `Ime3/rtas_candidate_request.h`: レイヤーごとに一つの有効な非同期リクエストを管理する。
+- `tests/unit/candidate_state_tests.cpp`: Enter の判断、既定プロバイダーの日本語保持、遅延応答拒否を検証する。
+
+翻訳の文書への反映は既定で replace。TSF や SendInput の互換処理は維持する。

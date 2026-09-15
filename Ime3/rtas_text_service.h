@@ -27,6 +27,8 @@
 #include "rtas_utils.h"
 #include "rtas_virtual_keys.h"
 #include "rtas_translation.h"
+#include "rtas_candidate_request.h"
+#include "rtas_layer_state.h"
 #include "rtas_ui.h"
 #include "../src/config/provider_settings.h"
 #include "../src/api/conversion_provider.h"
@@ -325,7 +327,8 @@ public:
         }
         HideOverlay();
         DestroyOverlay();
-        CancelAllTranslations();
+        CancelActiveTranslationRequest();
+        CancelActiveLayer2Request();
         StopOllamaResidencyOnDeactivate();
         m_translationCache.clear();
         m_layer2Cache.clear();
@@ -423,7 +426,7 @@ public:
             std::wstring fallbackSelected;
             if (m_candidateUI) {
                 const bool needPromote =
-                    (m_activeCandidateTab == CandidateTab::Layer1 &&
+                    (m_layerState.tab == CandidateTab::Layer1 &&
                      !IsLayer1MergedFromLayer2());
                 if (needPromote) {
                     fallbackSelected =
@@ -531,15 +534,16 @@ public:
         }
         if (wParam == VK_ESCAPE) {
             if (m_candidateUI) {
-                if (m_activeCandidateTab == CandidateTab::Translation) {
-                    m_activeCandidateTab = CandidateTab::Layer1;
+                if (m_layerState.tab == CandidateTab::Translation) {
+                    CancelActiveTranslationRequest();
+                    m_layerState.tab = CandidateTab::Layer1;
                     ShowLayer1Candidates(false);
                     if (eaten) *eaten = TRUE;
                     return S_OK;
                 }
-                if (m_activeCandidateTab == CandidateTab::Layer2) {
+                if (m_layerState.tab == CandidateTab::Layer2) {
                     CancelActiveLayer2Request();
-                    m_activeCandidateTab = CandidateTab::Layer1;
+                    m_layerState.tab = CandidateTab::Layer1;
                     SetLayer1Merged(false);
                     m_layer2SourceText.clear();
                     m_layer2SourceKey.clear();
@@ -565,7 +569,7 @@ public:
                         // Backspace in orange layer edits the orange text directly
                         // instead of cancelling back to blue/kana preview.
                         FinalizeLayer2BeforeNewInput(context);
-                        if (m_candidateUI && m_activeCandidateTab == CandidateTab::Layer2) {
+                        if (m_candidateUI && m_layerState.tab == CandidateTab::Layer2) {
                             MergeLayer2Selection(context);
                         }
                         if (IsLayer1MergedFromLayer2() && !m_layer2LockedPrefix.empty()) {
@@ -644,7 +648,7 @@ public:
             return S_OK;
         }
         if ((wParam == VK_LEFT || wParam == VK_RIGHT) &&
-            m_candidateUI && m_activeCandidateTab == CandidateTab::Layer1 && m_segmentMode) {
+            m_candidateUI && m_layerState.tab == CandidateTab::Layer1 && m_segmentMode) {
             if (SetActiveSegment(wParam == VK_RIGHT ? +1 : -1)) {
                 if (eaten) *eaten = TRUE;
                 return S_OK;
@@ -678,7 +682,7 @@ public:
                     // OpenCandidateUI internally calls CloseCandidateUI(), which
                     // clears state flags. Re-arm the space-trigger for this
                     // preedit so next typing can promote to orange.
-                    if (m_candidateUI && m_activeCandidateTab == CandidateTab::Layer1) {
+                    if (m_candidateUI && m_layerState.tab == CandidateTab::Layer1) {
                         m_layer1SpaceTriggered = true;
                     }
                     HideOverlay();
@@ -719,12 +723,12 @@ public:
                     }
                     if (eaten) *eaten = TRUE;
                 } else {
-                    if (m_activeCandidateTab == CandidateTab::Layer1) {
+                    if (m_layerState.tab == CandidateTab::Layer1) {
                         m_layer1SpaceTriggered = true;
                     }
                     bool advanceSelection = false;
                     bool handled = false;
-                    switch (m_activeCandidateTab) {
+                    switch (m_layerState.tab) {
                     case CandidateTab::Layer1:
                         if (IsLayer1MergedFromLayer2()) {
                             if (SupportsTranslationFlow()) {
@@ -915,21 +919,6 @@ public:
     // ITfDisplayAttributeProvider
     STDMETHODIMP EnumDisplayAttributeInfo(IEnumTfDisplayAttributeInfo** ppEnum) override;
     STDMETHODIMP GetDisplayAttributeInfo(REFGUID guid, ITfDisplayAttributeInfo** ppInfo) override;
-    // Async translation entry points (future Ollama integration)
-    uint64_t SubmitTranslationTask(const std::wstring& reading, const std::wstring& context) {
-        return QueueTranslationAsync(reading, context);
-    }
-    void CancelTranslationTask(uint64_t requestId) {
-        CancelTranslationAsync(requestId);
-        if (requestId == m_activeTranslationRequestId) {
-            m_activeTranslationRequestId = 0;
-        }
-    }
-    void CancelAllTranslationTasks() {
-        CancelAllTranslations();
-        m_candidateReading.clear();
-        ClearCandidateSourceText();
-    }
 private:
     template<class T> struct ComPtr { T* p = nullptr; ~ComPtr() { if (p) p->Release(); } T** operator&() { return &p; } operator bool()const { return p != nullptr; } T* operator->()const { return p; } };
     TextService() : m_ref(1), m_ptm(nullptr), m_tid(TF_CLIENTID_NULL) {}
@@ -967,17 +956,8 @@ private:
     HWND m_hwndAsyncDispatch = nullptr;
     std::mutex m_mainThreadMutex;
     std::queue<std::function<void()>> m_mainThreadCallbacks;
-    std::mutex m_translationMutex;
-    std::unordered_map<uint64_t, std::wstring> m_translationPending;
-    uint64_t m_activeTranslationRequestId = 0;
-    std::mutex m_layer2Mutex;
-    std::unordered_map<uint64_t, std::wstring> m_layer2Pending;
-    uint64_t m_activeLayer2RequestId = 0;
-    enum class CandidateTab {
-        Layer1,
-        Layer2,
-        Translation
-    };
+    CandidateRequest m_translationRequest;
+    CandidateRequest m_layer2Request;
     struct TranslationCacheEntry {
         std::vector<llm::CandidateEntry> candidates;
         size_t index = 0;
@@ -998,8 +978,7 @@ private:
     std::unordered_map<std::wstring, std::unordered_map<std::wstring, uint32_t>> m_candidateUsage;
     bool m_candidateUsageLoaded = false;
     bool m_candidateLearningEnabled = false;
-    CandidateTab m_activeCandidateTab = CandidateTab::Layer1;
-    bool m_layer1Merged = false;
+    LayerState m_layerState;
     bool m_layer1SpaceTriggered = false;
     size_t m_layer1Selection = 0;
     std::vector<std::wstring> m_layer1DisplayCache;
@@ -1044,26 +1023,12 @@ private:
     }
     // Layer1 merged-state: Layer2 candidate was merged back and is being edited on Layer1.
     // Pending auto-commit: Layer2 tab is active and next typing should merge current Layer2 selection first.
-    void SetLayer1Merged(bool merged) {
-        m_layer1Merged = merged;
-        if (merged) {
-            m_pendingLayer2AutoCommit = false;
-        }
-    }
-    void SetPendingLayer2AutoCommit(bool pending) {
-        m_pendingLayer2AutoCommit = pending;
-        if (pending) {
-            m_layer1Merged = false;
-        }
-    }
-    bool IsLayer1MergedFromLayer2() const {
-        return m_layer1Merged && m_activeCandidateTab == CandidateTab::Layer1;
-    }
-    bool HasPendingLayer2AutoCommitTransition() const {
-        return m_pendingLayer2AutoCommit && m_activeCandidateTab == CandidateTab::Layer2;
-    }
+    void SetLayer1Merged(bool merged) { m_layerState.SetMerged(merged); }
+    void SetPendingLayer2AutoCommit(bool pending) { m_layerState.SetPendingCarry(pending); }
+    bool IsLayer1MergedFromLayer2() const { return m_layerState.IsMerged(); }
+    bool HasPendingLayer2AutoCommitTransition() const { return m_layerState.HasPendingCarry(); }
     bool IsOrangeEditingState() const {
-        return (m_activeCandidateTab == CandidateTab::Layer2) ||
+        return (m_layerState.tab == CandidateTab::Layer2) ||
                IsLayer1MergedFromLayer2() ||
                HasPendingLayer2AutoCommitTransition() ||
                HasLayer2LockedCarry();
@@ -1195,8 +1160,8 @@ private:
         CancelActiveTranslationRequest();
         CancelActiveLayer2Request();
         SetPendingLayer2AutoCommit(false);
-        if (m_candidateUI && m_activeCandidateTab != CandidateTab::Layer1) {
-            m_activeCandidateTab = CandidateTab::Layer1;
+        if (m_candidateUI && m_layerState.tab != CandidateTab::Layer1) {
+            m_layerState.tab = CandidateTab::Layer1;
             ShowLayer1Candidates(true);
             std::wstring preview =
                 m_segmentMode ? ComposeSegmentReading() : m_candidateUI->SelectedString();
@@ -1309,18 +1274,14 @@ private:
                 m_installRoot.clear();
             }
         }
-        CancelAllTranslations();
+        CancelActiveTranslationRequest();
+        CancelActiveLayer2Request();
         m_providerLoadError.clear();
         m_conversionProvider.reset();
         m_providerCapabilities = {};
         m_kanaKanjiOnlyMode = false;
         m_translationCache.clear();
         m_layer2Cache.clear();
-        {
-            std::lock_guard<std::mutex> lock(m_layer2Mutex);
-            m_layer2Pending.clear();
-        }
-        m_activeLayer2RequestId = 0;
         m_layer2PendingActive = false;
         const std::filesystem::path configPath = ResolveInstallPath(L"config/ime_settings.json");
         m_providerSettings = ime::config::LoadProviderSettings(configPath, &m_providerLoadError);
@@ -2233,7 +2194,7 @@ private:
         return merged;
     }
     bool IsLikelyPartialLayer1Candidate(const std::wstring& candidate) const {
-        if (m_activeCandidateTab != CandidateTab::Layer1) return false;
+        if (m_layerState.tab != CandidateTab::Layer1) return false;
         // When appending new text after a Layer2 merge, do not apply
         // partial-candidate tail merge heuristics. It can duplicate the
         // suffix (e.g. "...なんか" -> "...南下なんか").
@@ -2389,12 +2350,13 @@ private:
         m_layer2SourceText = source;
         const std::wstring key = BuildLayer2CacheKey(source);
         m_layer2SourceKey = key;
+        CancelActiveLayer2Request();
         if (!forceRefresh) {
             auto it = m_layer2Cache.find(key);
             if (it != m_layer2Cache.end() && (!it->second.candidates.empty() || !it->second.error.empty())) {
                 TouchLayer2CacheEntry(it->second);
                 EnforceLayer2CacheLimits();
-                if (m_activeCandidateTab == CandidateTab::Layer2) {
+                if (m_layerState.tab == CandidateTab::Layer2) {
                     ShowLayer2CandidatesFromCache();
                 }
                 return true;
@@ -2402,7 +2364,6 @@ private:
         } else {
             m_layer2Cache.erase(key);
         }
-        CancelActiveLayer2Request();
         if (!m_conversionProvider) {
             return false;
         }
@@ -2417,13 +2378,9 @@ private:
             return true;
         }
         if (list.requestId) {
-            {
-                std::lock_guard<std::mutex> lock(m_layer2Mutex);
-                m_layer2Pending[*list.requestId] = key;
-            }
-            m_activeLayer2RequestId = *list.requestId;
+            m_layer2Request.Start(*list.requestId, key);
             SetLayer2Pending(true);
-            if (m_activeCandidateTab == CandidateTab::Layer2) {
+            if (m_layerState.tab == CandidateTab::Layer2) {
                 ShowPendingPlaceholder(false);
             }
             return true;
@@ -2451,7 +2408,7 @@ private:
                 EnforceLayer2CacheLimits();
             }
         }
-        if (m_activeCandidateTab == CandidateTab::Layer2 && key == m_layer2SourceKey) {
+        if (m_layerState.tab == CandidateTab::Layer2 && key == m_layer2SourceKey) {
             ShowLayer2CandidatesFromCache(true);
         }
         SetLayer2Pending(false);
@@ -2481,10 +2438,10 @@ private:
         m_segmentDisplayRanges.clear();
         m_segmentBaseReading.clear();
         SetLayer1Merged(false);
-        m_activeCandidateTab = CandidateTab::Layer2;
+        m_layerState.tab = CandidateTab::Layer2;
         ClearLayer2LockedCarry();
         if (!RequestLayer2Alternatives(forceRefresh)) {
-            m_activeCandidateTab = CandidateTab::Layer1;
+            m_layerState.tab = CandidateTab::Layer1;
             ShowLayer1Candidates(true);
             SetPendingLayer2AutoCommit(false);
             return false;
@@ -2539,7 +2496,7 @@ private:
         SetPendingLayer2AutoCommit(false);
         std::wstring merged;
         if (!ResolveLayer2SelectionText(merged)) {
-            m_activeCandidateTab = CandidateTab::Layer1;
+            m_layerState.tab = CandidateTab::Layer1;
             ShowLayer1Candidates(false);
             return;
         }
@@ -2549,7 +2506,7 @@ private:
         m_layer1Selection = 0;
         SetLayer1Merged(true);
         SetCandidateSourceText(merged);
-        m_activeCandidateTab = CandidateTab::Layer1;
+        m_layerState.tab = CandidateTab::Layer1;
         // Layer2 selection was merged (orange state established), so end
         // half-width lock from the prior blue/red preedit.
         ResetForceHalfWidthInput();
@@ -2564,7 +2521,7 @@ private:
         SetPendingLayer2AutoCommit(false);
         std::wstring commit;
         if (!ResolveLayer2SelectionText(commit)) {
-            m_activeCandidateTab = CandidateTab::Layer1;
+            m_layerState.tab = CandidateTab::Layer1;
             ShowLayer1Candidates(false);
             return;
         }
@@ -2603,14 +2560,14 @@ private:
     bool FinalizeLayer2BeforeNewInput(ITfContext* context) {
         if (!m_candidateUI) return false;
         if (HasPendingLayer2AutoCommitTransition()) {
-            if (m_activeCandidateTab == CandidateTab::Layer2) {
+            if (m_layerState.tab == CandidateTab::Layer2) {
                 MergeLayer2Selection(context);
             }
             if (!m_candidateUI) {
                 m_layer2MergedCarryOpen = false;
                 return false;
             }
-            if (m_activeCandidateTab != CandidateTab::Layer1) return false;
+            if (m_layerState.tab != CandidateTab::Layer1) return false;
             SetPendingLayer2AutoCommit(false);
             m_layer2MergedCarryOpen = true;
         }
@@ -2707,26 +2664,21 @@ private:
     }
     void HandleTabEnter(ITfContext* context, bool shiftPressed = false) {
         if (!m_candidateUI) return;
-        switch (m_activeCandidateTab) {
-        case CandidateTab::Layer1:
-            // Enter on Layer1 should only commit when the current reading is
-            // already a merged Layer2 result. Otherwise transition to Layer2.
-            if (IsLayer1MergedFromLayer2() || !SupportsLayer2Flow()) {
-                CommitCandidateSelection(context);
-            } else {
-                SwitchToLayer2FromLayer1(false);
-            }
+        switch (m_layerState.OnEnter(shiftPressed, SupportsLayer2Flow())) {
+        case CandidateEnterAction::HoldInLayer2:
+            SwitchToLayer2FromLayer1(false);
             break;
-        case CandidateTab::Layer2:
-            // Enter commits Layer2 selection directly; Shift+Enter keeps the
-            // previous merge-back path for continued Layer1 editing.
-            if (shiftPressed) {
-                MergeLayer2Selection(context);
-            } else {
+        case CandidateEnterAction::CommitJapanese:
+            if (m_layerState.tab == CandidateTab::Layer2) {
                 CommitLayer2Selection(context);
+            } else {
+                CommitCandidateSelection(context);
             }
             break;
-        case CandidateTab::Translation:
+        case CandidateEnterAction::MergeIntoLayer1:
+            MergeLayer2Selection(context);
+            break;
+        case CandidateEnterAction::CommitTranslation:
             CommitTranslationSelection(context);
             break;
         }
@@ -2742,25 +2694,25 @@ private:
             order.push_back(CandidateTab::Translation);
         }
         if (order.size() <= 1) {
-            m_activeCandidateTab = CandidateTab::Layer1;
+            m_layerState.tab = CandidateTab::Layer1;
             ShowLayer1Candidates(true);
             return;
         }
         int idx = 0;
         for (int i = 0; i < static_cast<int>(order.size()); ++i) {
-            if (order[i] == m_activeCandidateTab) { idx = i; break; }
+            if (order[i] == m_layerState.tab) { idx = i; break; }
         }
         for (size_t attempt = 0; attempt < order.size(); ++attempt) {
             idx = reverse ? (idx - 1 + static_cast<int>(order.size())) % static_cast<int>(order.size())
                           : (idx + 1) % static_cast<int>(order.size());
             CandidateTab next = order[idx];
             if (next == CandidateTab::Layer1) {
-                m_activeCandidateTab = CandidateTab::Layer1;
+                m_layerState.tab = CandidateTab::Layer1;
                 ShowLayer1Candidates(true);
                 return;
             }
             if (next == CandidateTab::Layer2) {
-                if (m_activeCandidateTab == CandidateTab::Layer1 && SwitchToLayer2FromLayer1(false)) return;
+                if (m_layerState.tab == CandidateTab::Layer1 && SwitchToLayer2FromLayer1(false)) return;
                 continue;
             }
             if (next == CandidateTab::Translation) {
@@ -2779,65 +2731,21 @@ private:
         };
         const uint64_t id = m_asyncQueue.Enqueue(std::move(job));
         if (id) {
-            std::lock_guard<std::mutex> lock(m_translationMutex);
-            m_translationPending[id] = BuildTranslationCacheKey(trimmed);
+            m_translationRequest.Start(id, BuildTranslationCacheKey(trimmed));
         }
         return id;
     }
-    void CancelTranslationAsync(uint64_t id) {
-        if (!id) return;
-        m_asyncQueue.Cancel(id);
-        if (m_conversionProvider) {
-            m_conversionProvider->Cancel(id);
-        }
-        std::lock_guard<std::mutex> lock(m_translationMutex);
-        m_translationPending.erase(id);
-    }
-    void CancelAllTranslations() {
-        std::unordered_map<uint64_t, std::wstring> pending;
-        {
-            std::lock_guard<std::mutex> lock(m_translationMutex);
-            pending.swap(m_translationPending);
-        }
-        for (const auto& entry : pending) {
-            m_asyncQueue.Cancel(entry.first);
-            if (m_conversionProvider) {
-                m_conversionProvider->Cancel(entry.first);
-            }
-        }
-        m_activeTranslationRequestId = 0;
-        SetTranslationPending(false);
-    }
     void CancelActiveTranslationRequest() {
-        if (!m_activeTranslationRequestId) return;
-        CancelTranslationAsync(m_activeTranslationRequestId);
-        m_activeTranslationRequestId = 0;
+        const uint64_t id = m_translationRequest.Cancel();
+        if (id) {
+            m_asyncQueue.Cancel(id);
+            if (m_conversionProvider) m_conversionProvider->Cancel(id);
+        }
         SetTranslationPending(false);
     }
     void CancelActiveLayer2Request() {
-        if (!m_activeLayer2RequestId) return;
-        if (m_conversionProvider) {
-            m_conversionProvider->Cancel(m_activeLayer2RequestId);
-        }
-        {
-            std::lock_guard<std::mutex> lock(m_layer2Mutex);
-            m_layer2Pending.erase(m_activeLayer2RequestId);
-        }
-        m_activeLayer2RequestId = 0;
-        SetLayer2Pending(false);
-    }
-    void CancelAllLayer2Requests() {
-        std::unordered_map<uint64_t, std::wstring> pending;
-        {
-            std::lock_guard<std::mutex> lock(m_layer2Mutex);
-            pending.swap(m_layer2Pending);
-        }
-        for (const auto& entry : pending) {
-            if (m_conversionProvider) {
-                m_conversionProvider->Cancel(entry.first);
-            }
-        }
-        m_activeLayer2RequestId = 0;
+        const uint64_t id = m_layer2Request.Cancel();
+        if (id && m_conversionProvider) m_conversionProvider->Cancel(id);
         SetLayer2Pending(false);
     }
     void ApplyTranslationCandidates(const std::wstring& key, ime::conversion::CandidateList result) {
@@ -2860,7 +2768,7 @@ private:
                 EnforceTranslationCacheLimits();
             }
         }
-        if (m_activeCandidateTab == CandidateTab::Translation && key == m_candidateSourceKey) {
+        if (m_layerState.tab == CandidateTab::Translation && key == m_candidateSourceKey) {
             ShowTranslationCandidatesFromCache(true);
         }
         SetTranslationPending(false);
@@ -2870,12 +2778,13 @@ private:
         if (trimmed.empty()) return false;
         const std::wstring key = BuildTranslationCacheKey(trimmed);
         SetCandidateSourceText(trimmed);
+        CancelActiveTranslationRequest();
         if (!forceRefresh) {
             auto it = m_translationCache.find(key);
             if (it != m_translationCache.end() && (!it->second.candidates.empty() || !it->second.error.empty())) {
                 TouchTranslationCacheEntry(it->second);
                 EnforceTranslationCacheLimits();
-                if (m_activeCandidateTab == CandidateTab::Translation) {
+                if (m_layerState.tab == CandidateTab::Translation) {
                     ShowTranslationCandidatesFromCache(true);
                 }
                 return true;
@@ -2883,7 +2792,6 @@ private:
         } else {
             m_translationCache.erase(key);
         }
-        CancelActiveTranslationRequest();
         if (m_conversionProvider) {
             ime::conversion::LayerRequestContext ctx;
             ctx.reading = trimmed;
@@ -2896,13 +2804,9 @@ private:
                 return true;
             }
             if (list.pending && list.requestId) {
-                {
-                    std::lock_guard<std::mutex> lock(m_translationMutex);
-                    m_translationPending[*list.requestId] = key;
-                }
-                m_activeTranslationRequestId = *list.requestId;
+                m_translationRequest.Start(*list.requestId, key);
                 SetTranslationPending(true);
-                if (m_activeCandidateTab == CandidateTab::Translation) {
+                if (m_layerState.tab == CandidateTab::Translation) {
                     ShowPendingPlaceholder(false);
                 }
                 return true;
@@ -2912,9 +2816,8 @@ private:
         }
         const uint64_t id = QueueTranslationAsync(trimmed, L"");
         if (id) {
-            m_activeTranslationRequestId = id;
             SetTranslationPending(true);
-            if (m_activeCandidateTab == CandidateTab::Translation) {
+            if (m_layerState.tab == CandidateTab::Translation) {
                 ShowPendingPlaceholder(false);
             }
             return true;
@@ -2941,7 +2844,7 @@ private:
     bool SwitchToTranslationTab(bool forceRefresh = false) {
         if (!SupportsTranslationFlow()) return false;
         if (!m_candidateUI) return false;
-        if (m_activeCandidateTab == CandidateTab::Layer2) {
+        if (m_layerState.tab == CandidateTab::Layer2) {
             // Use current Layer2 selection as translation source without requiring merge/commit.
             std::wstring source;
             if (!ResolveLayer2SelectionText(source)) {
@@ -2958,69 +2861,28 @@ private:
             if (base.empty()) return false;
             SetCandidateSourceText(base);
         }
-        m_activeCandidateTab = CandidateTab::Translation;
+        m_layerState.tab = CandidateTab::Translation;
         SetPendingLayer2AutoCommit(false);
         ClearLayer2LockedCarry();
         if (!StartTranslationForCandidate(m_candidateSourceText, forceRefresh)) {
-            m_activeCandidateTab = CandidateTab::Layer1;
+            m_layerState.tab = CandidateTab::Layer1;
             ShowLayer1Candidates(true);
             return false;
         }
         return true;
     }
     void OnProviderResult(uint64_t requestId, ime::conversion::CandidateList result) {
-        std::wstring layer2Key;
-        {
-            std::lock_guard<std::mutex> lock(m_layer2Mutex);
-            auto it = m_layer2Pending.find(requestId);
-            if (it != m_layer2Pending.end()) {
-                layer2Key = it->second;
-                m_layer2Pending.erase(it);
-            }
+        if (result.layer == 2) {
+            auto key = m_layer2Request.Complete(requestId, m_layer2SourceKey, result.pending);
+            if (key) ApplyLayer2Candidates(*key, std::move(result));
+        } else if (result.layer == 3) {
+            auto key = m_translationRequest.Complete(requestId, m_candidateSourceKey, result.pending);
+            if (key) ApplyTranslationCandidates(*key, std::move(result));
         }
-        if (!layer2Key.empty()) {
-            if (requestId == m_activeLayer2RequestId) {
-                m_activeLayer2RequestId = 0;
-            }
-            if (!result.pending) {
-                ApplyLayer2Candidates(layer2Key, std::move(result));
-            }
-            return;
-        }
-        std::wstring key;
-        {
-            std::lock_guard<std::mutex> lock(m_translationMutex);
-            auto it = m_translationPending.find(requestId);
-            if (it != m_translationPending.end()) {
-                key = it->second;
-                m_translationPending.erase(it);
-            }
-        }
-        if (requestId == m_activeTranslationRequestId) {
-            m_activeTranslationRequestId = 0;
-        }
-        if (result.pending) {
-            return;
-        }
-        if (key.empty()) {
-            key = m_candidateSourceKey;
-        }
-        ApplyTranslationCandidates(key, std::move(result));
     }
     void OnTranslationReady(TranslationResult result) {
-        std::wstring key;
-        {
-            std::lock_guard<std::mutex> lock(m_translationMutex);
-            auto it = m_translationPending.find(result.requestId);
-            if (it != m_translationPending.end()) {
-                key = it->second;
-                m_translationPending.erase(it);
-            }
-        }
-        const bool isActiveRequest = (result.requestId == m_activeTranslationRequestId);
-        if (isActiveRequest) {
-            m_activeTranslationRequestId = 0;
-        }
+        auto key = m_translationRequest.Complete(result.requestId, m_candidateSourceKey);
+        if (!key) return;
         if (result.cancelled) {
             SetTranslationPending(false);
             return;
@@ -3029,11 +2891,8 @@ private:
         list.layer = 3;
         if (!result.success) {
             list.error = result.error;
-            ApplyTranslationCandidates(key, std::move(list));
+            ApplyTranslationCandidates(*key, std::move(list));
             return;
-        }
-        if (key.empty()) {
-            key = BuildTranslationCacheKey(result.source);
         }
         llm::CandidateEntry entry;
         entry.id = L"fallback_translation";
@@ -3043,7 +2902,7 @@ private:
         entry.reading = TrimWhitespace(result.source);
         entry.source = llm::CandidateSource::Llm;
         list.entries.emplace_back(std::move(entry));
-        ApplyTranslationCandidates(key, std::move(list));
+        ApplyTranslationCandidates(*key, std::move(list));
     }
     CandidateUI* m_candidateUI = nullptr;
     ITfContext* m_candidateContext = nullptr;
@@ -3054,7 +2913,6 @@ private:
     bool m_translationPendingShown = false;
     bool m_layer2PendingActive = false;
     bool m_translationPendingActive = false;
-    bool m_pendingLayer2AutoCommit = false;
     bool m_layer2MergedCarryOpen = false;
     std::wstring m_layer2LockedPrefix;
     struct SegmentRuntime {
@@ -3147,7 +3005,7 @@ private:
         m_layer1Selection = 0;
         SetLayer1Merged(false);
         m_layer1SpaceTriggered = false;
-        m_activeCandidateTab = CandidateTab::Layer1;
+        m_layerState.tab = CandidateTab::Layer1;
         m_layer2PendingActive = false;
         m_translationPendingActive = false;
         SetPendingLayer2AutoCommit(false);
@@ -3419,7 +3277,7 @@ private:
         m_layer1DisplayCache = std::move(cands);
         m_layer1Selection = 0;
         SetLayer1Merged(false);
-        m_activeCandidateTab = CandidateTab::Layer1;
+        m_layerState.tab = CandidateTab::Layer1;
         ShowLayer1Candidates(true);
         std::wstring initialCandidate = m_candidateUI->SelectedString();
         if (initialCandidate.empty() && !m_layer1DisplayCache.empty()) {
@@ -3441,7 +3299,7 @@ private:
         if (!m_candidateUI) return;
         int sel = m_candidateUI->SelectionIndex();
         if (sel < 0) sel = 0;
-        switch (m_activeCandidateTab) {
+        switch (m_layerState.tab) {
         case CandidateTab::Layer1:
             m_layer1Selection = static_cast<size_t>(sel);
             if (m_segmentMode && !m_layer1SegmentRuntime.empty() &&
@@ -3688,10 +3546,10 @@ private:
     // ITfCompositionSink
     STDMETHODIMP OnCompositionTerminated(TfEditCookie, ITfComposition*) override { if (m_composition) { m_composition->Release(); m_composition = nullptr; } DraftText().clear(); m_romajiBuffer.clear(); ResetForceHalfWidthInput(); CloseCandidateUI(); HideOverlay(); ResetCompositionCaretToEnd(); return S_OK; }
     TfGuidAtom CurrentDisplayAttributeAtom() const {
-        if ((m_activeCandidateTab == CandidateTab::Translation) || m_translationPendingActive) {
+        if ((m_layerState.tab == CandidateTab::Translation) || m_translationPendingActive) {
             if (m_gaDisplayAttrTranslation) return m_gaDisplayAttrTranslation;
         }
-        if ((m_activeCandidateTab == CandidateTab::Layer2) || m_layer2PendingActive || IsLayer1MergedFromLayer2()) {
+        if ((m_layerState.tab == CandidateTab::Layer2) || m_layer2PendingActive || IsLayer1MergedFromLayer2()) {
             if (m_gaDisplayAttrLayer2) return m_gaDisplayAttrLayer2;
         }
         return m_gaDisplayAttrPreedit;
@@ -3719,7 +3577,7 @@ private:
         // In carry-forward mode, keep the locked Layer2 prefix visually
         // distinct (orange) while new tail input stays in Layer1 (blue).
         if (HasLayer2LockedCarry() &&
-            m_activeCandidateTab == CandidateTab::Layer1 &&
+            m_layerState.tab == CandidateTab::Layer1 &&
             m_gaDisplayAttrLayer2) {
             const size_t prefixLen = m_layer2LockedPrefix.size();
             if (prefixLen <= text.size() &&
@@ -3738,7 +3596,7 @@ private:
                 }
             }
         }
-        if (!(m_segmentMode && m_activeCandidateTab == CandidateTab::Layer1)) {
+        if (!(m_segmentMode && m_layerState.tab == CandidateTab::Layer1)) {
             return;
         }
         if (text.empty()) return;

@@ -13,6 +13,12 @@
     <ClCompile Include="conversion_provider_tests.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="candidate_state_tests.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\provider\mozc_conversion_provider.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
     <ClCompile Include="..\\..\\src\\provider\\dictionary_conversion_provider.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>

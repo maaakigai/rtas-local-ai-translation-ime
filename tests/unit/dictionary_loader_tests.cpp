@@ -19,6 +19,7 @@
 #include "../../Ime3/rtas_utils.h"
 
 bool RunConversionProviderSmokeTest();
+bool RunCandidateStateTests();
 
 int main() try {
     namespace fs = std::filesystem;
@@ -623,6 +624,7 @@ int main() try {
 
     bool providerSmoke = RunConversionProviderSmokeTest();
     expect(providerSmoke, "conversion provider smoke test");
+    expect(RunCandidateStateTests(), "candidate state and async regression tests");
     return ok ? 0 : 1;
 } catch (const std::exception& ex) {
     std::fprintf(stderr, "UNEXPECTED EXCEPTION: %s\n", ex.what());

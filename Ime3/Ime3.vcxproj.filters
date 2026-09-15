@@ -27,6 +27,12 @@
     <ClInclude Include="rtas_text_service.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+    <ClInclude Include="rtas_candidate_request.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="rtas_layer_state.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
     <ClInclude Include="rtas_globals.h">
       <Filter>Header Files</Filter>
     </ClInclude>

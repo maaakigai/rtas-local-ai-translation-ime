@@ -133,6 +133,8 @@
     <ClInclude Include="rtas_factory.h" />
     <ClInclude Include="rtas_registration.h" />
     <ClInclude Include="rtas_text_service.h" />
+    <ClInclude Include="rtas_candidate_request.h" />
+    <ClInclude Include="rtas_layer_state.h" />
     <ClInclude Include="rtas_globals.h" />
     <ClInclude Include="rtas_ui.h" />
     <ClInclude Include="rtas_translation.h" />

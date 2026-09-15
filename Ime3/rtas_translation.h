@@ -39,7 +39,8 @@ private:
     std::condition_variable m_cv;
     std::queue<QueueItem> m_queue;
     std::unordered_map<uint64_t, CancelFlag> m_pending;
-    std::atomic_uint64_t m_nextId{ 0 };
+    // IDs must not repeat when a provider is replaced or a different queue is used.
+    inline static std::atomic_uint64_t m_nextId{ 0 };
     bool m_stop = false;
     bool m_started = false;
 };
@@ -89,4 +90,3 @@ OllamaLifecycleResult WarmupOllamaModel(
 OllamaLifecycleResult UnloadOllamaModel(
     const TranslationLlmSettings& llmSettings,
     const AsyncWorkQueue::CancelFlag& cancelFlag = {});
-
