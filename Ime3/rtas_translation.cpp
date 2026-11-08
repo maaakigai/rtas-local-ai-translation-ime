@@ -398,6 +398,43 @@ void AsyncWorkQueue::WorkerLoop() {
     }
 }
 
+std::string BuildTranslationRequestBody(const std::wstring& model,
+    const std::wstring& reading, const std::wstring& context,
+    const std::wstring& keepAlive) {
+    const bool plamo = model.find(L"plamo-3-translate") != std::wstring::npos;
+    const std::string source = WideToUtf8(TrimWhitespace(reading));
+    const std::string reference = WideToUtf8(TrimWhitespace(context));
+    std::string prompt;
+    if (plamo) {
+        // PFML3 delimiters must not be interpreted as structure inside user text.
+        if (source.find("<|plamo:") != std::string::npos ||
+            reference.find("<|plamo:") != std::string::npos) return {};
+        prompt = "<|plamo:tag|>dataset<|plamo:msg|>translation";
+        if (!reference.empty()) {
+            prompt += "<|plamo:tag|>context<|plamo:msg|>" + reference;
+        }
+        prompt += "<|plamo:tag|>input<|plamo:key|>lang<|plamo:val|>ja<|plamo:msg|>";
+        prompt += source;
+        prompt += "<|plamo:tag|>output<|plamo:key|>lang<|plamo:val|>en<|plamo:msg|>";
+    } else {
+        prompt = "Translate the following Japanese text into natural English. Reply with English only and avoid extra commentary.\n";
+        prompt += source;
+        if (!reference.empty()) prompt += "\nContext: " + reference;
+    }
+    std::string body = "{\"model\":\"" + EscapeJsonString(WideToUtf8(model)) + "\"";
+    body += ",\"prompt\":\"" + EscapeJsonString(prompt) + "\",\"stream\":false";
+    if (plamo) {
+        // Bypass Ollama's chat template: the prompt already contains PFML3.
+        body += ",\"raw\":true,\"options\":{\"temperature\":0,\"num_predict\":1024,";
+        body += "\"stop\":[\"<|plamo:tag|>\",\"<|plamo:bos|>\"]}";
+    } else {
+        body += ",\"options\":{\"temperature\":0.2}";
+    }
+    AppendKeepAliveJson(body, keepAlive);
+    body += "}";
+    return body;
+}
+
 TranslationResult ExecuteTranslationJob(uint64_t id,
     const std::wstring& reading,
     const std::wstring& context,
@@ -431,6 +468,12 @@ TranslationResult ExecuteTranslationJob(uint64_t id,
         return result;
     }
 
+    const std::string body = BuildTranslationRequestBody(model, trimmedReading, context, llmSettings.keepAlive);
+    if (body.empty()) {
+        result.error = L"Translation text contains a reserved PLaMo delimiter (<|plamo:).";
+        return result;
+    }
+
     WinHttpHandle session;
     session.handle = WinHttpOpen(kUserAgent, WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0);
     if (!session.handle) {
@@ -459,28 +502,6 @@ TranslationResult ExecuteTranslationJob(uint64_t id,
     request.handle = WinHttpOpenRequest(connection.handle, L"POST", path.c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, requestFlags);
     if (!request.handle) {
         SetWinHttpError(result.error, L"WinHttpOpenRequest", GetLastError());
-        return result;
-    }
-
-    const std::string modelUtf8 = WideToUtf8(model);
-    std::string prompt = "Translate the following Japanese text into natural English. Reply with English only and avoid extra commentary.\n";
-    prompt += WideToUtf8(trimmedReading);
-    const std::string contextUtf8 = WideToUtf8(TrimWhitespace(context));
-    if (!contextUtf8.empty()) {
-        prompt += "\nContext: ";
-        prompt += contextUtf8;
-    }
-
-    std::string body = "{";
-    body += "\"model\":\"" + EscapeJsonString(modelUtf8) + "\"";
-    body += ",\"prompt\":\"" + EscapeJsonString(prompt) + "\"";
-    body += ",\"stream\":false";
-    body += ",\"options\":{\"temperature\":0.2}";
-    AppendKeepAliveJson(body, llmSettings.keepAlive);
-    body += "}";
-
-    if (cancelFlag->load(std::memory_order_relaxed)) {
-        result.cancelled = true;
         return result;
     }
 
@@ -528,6 +549,22 @@ TranslationResult ExecuteTranslationJob(uint64_t id,
     }
 
     std::string responseField;
+    if (ExtractJsonString(response, "error", responseField)) {
+        result.error = L"Ollama: " + Utf8ToWide(responseField);
+        return result;
+    }
+    DWORD statusCode = 0;
+    DWORD statusLen = sizeof(statusCode);
+    if (WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER,
+            WINHTTP_HEADER_NAME_BY_INDEX, &statusCode, &statusLen, WINHTTP_NO_HEADER_INDEX) && statusCode >= 400) {
+        result.error = L"Ollama returned HTTP " + std::to_wstring(statusCode);
+        return result;
+    }
+    std::string doneReason;
+    if (ExtractJsonString(response, "done_reason", doneReason) && doneReason == "length") {
+        result.error = L"Translation exceeded the model's output limit.";
+        return result;
+    }
     if (!ExtractJsonString(response, "response", responseField)) {
         result.error = L"Failed to parse Ollama response.";
         return result;

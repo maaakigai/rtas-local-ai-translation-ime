@@ -135,9 +135,8 @@ bridgeは公開APIではないため、互換性・保守性・利用条件に�
 - Windows 10 / 11 x64
 - [Google 日本語入力 Windows版](https://www.google.co.jp/ime/)
 - [Ollama for Windows](https://docs.ollama.com/windows)
-- Ollamaモデル用の空き容量
-  - `gemma3:4b`の場合は約3.3 GB
-- NVIDIAまたはAMD GPUを推奨
+- Ollamaモデル用の空き容量（PLaMo 3 Translate 2B Q4_K_Mは約1.8 GB）
+- 既定の翻訳モデルはCPUで実行（GPU不要）
 
 ### ビルド環境
 
@@ -199,22 +198,25 @@ RTAS DLL内のbridge実装から呼び出します。Windows標準のMicrosoft I
 winget install --id Ollama.Ollama --exact --source winget `
   --accept-source-agreements --accept-package-agreements
 
-ollama pull gemma3:4b
-ollama cp gemma3:4b default
+ollama pull hf.co/pfnet/plamo-3-translate-2b-GGUF:Q4_K_M
+ollama create plamo-3-translate:2b -f config/plamo-3-translate.Modelfile
 ```
 
-設定中の`default`はOllamaの予約語ではなく、ローカルに作成するモデルエイリアスです。
-上の例では`gemma3:4b`を`default`という名前で参照できるようにしています。
-これにより、RTASの設定を変更せず、Ollama側で実モデルを差し替えられます。
+翻訳には[PLaMo 3 Translate](https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF)の
+公式GGUFを使います。Ollama 0.40.14で動作確認済みです。古いOllamaで読み込めない場合は更新してください。
+同梱ModelfileはCPU実行を指定します。開発PCのRTX 3060 Tiでは0.8BのGPU実行が短文でも約21秒かかったためです。
+既定は文脈の取り違えがあった0.8Bより品質を優先し、2Bを採用しています。
+GPUで試す場合はModelfileの`PARAMETER num_gpu 0`を削除して、`ollama create`を再実行してください。
 
-OllamaのAPIと、`default`エイリアスが作成されたことを確認します。
+OllamaのAPIと、翻訳モデルが作成されたことを確認します。
 
 ```powershell
 Invoke-RestMethod http://127.0.0.1:11434/api/version
 ollama list
 ```
 
-一覧に`default:latest`が表示されれば、既定モデルの準備は完了です。
+一覧に`plamo-3-translate:2b`が表示されれば準備完了です。
+モデルはリポジトリに同梱しません。利用条件は[PLaMoコミュニティライセンス](https://plamo.preferredai.jp/info/plamo-community-license-ja)を参照してください。
 
 ### 5. Release x64をビルド
 
@@ -280,6 +282,40 @@ Start-Process regsvr32.exe -ArgumentList "`"$dll`"" -Wait
 | `ENTER` | 選択中の候補を確定 |
 | `ESC` | 現在の候補レイヤーを閉じる、または処理をキャンセル |
 
+### 編集・文字種変換・候補選択
+
+以下はRTASの未確定文字列があるときに使えます。F6〜F10の対応は
+[Microsoft日本語IMEの標準キー](https://support.microsoft.com/ja-jp/windows/hardware/input-devices/microsoft-japanese-ime)に合わせています。
+
+| キー | 動作 |
+| --- | --- |
+| `Ctrl + Space` / `Ctrl + Shift + Space` | カーソル位置へ半角／全角スペースを挿入 |
+| `F6` / `Ctrl + U` | ひらがなへ変換 |
+| `F7` / `Ctrl + I` | 全角カタカナへ変換 |
+| `F8` / `Ctrl + O` | 半角カタカナへ変換 |
+| `F9` / `Ctrl + P` | 入力したローマ字を全角英数へ変換 |
+| `F10` / `Ctrl + T` | 入力したローマ字を半角英数へ変換 |
+| 同じ `F9` / `F10` を連続して押す | 元の綴り、大文字、単語先頭大文字を巡回 |
+| `無変換` | ひらがな、全角カタカナ、半角カタカナを巡回 |
+| `Shift + 無変換` | 全角英数、半角英数を切り替え |
+| `変換` | `Space`と同じ変換・候補操作 |
+| `Left` / `Right` | カーソル移動。日本語の文節候補を開いている場合は対象文節を移動 |
+| `Home` / `End` | 未確定文字列の先頭／末尾へ移動 |
+| `Shift + Left / Right / Home / End` | 未確定文字列を選択。続く入力・削除で選択範囲を置換／削除 |
+| `Backspace` / `Delete` | カーソル直前／直後を削除。通常の日本語候補中のBackspaceは候補を閉じる |
+| `Up` / `Down`、`Shift + Tab` / `Tab` | 前／次の候補。候補未表示なら候補を開く |
+| `Shift + Space`（通常の日本語候補） | 前の候補。言い換え・翻訳タブでは従来どおり再問い合わせ |
+| `PageUp` / `PageDown` | 候補を9件ずつページ移動 |
+| `1`〜`9`（テンキーも可） | 表示ページの候補を選択し、Enterと同じレイヤー操作を実行 |
+| `Ctrl + Tab` / `Ctrl + Shift + Tab` | 次／前の候補タブへ移動 |
+| `Ctrl + CapsLock` | 日本語入力を有効化（未確定文字列がなくても使用可） |
+| `Alt + バッククォート` | 英語キーボード用のIMEオン／オフ（未確定文字列がなくても使用可） |
+
+未確定文字列がないときの`Ctrl + T`などはアプリへ渡します。`Ctrl + C / V / X / Z / Y / A / S`、
+通常のAlt・Windowsキー操作もRTASでは取り込みません。`Shift + F10`のコンテキストメニュー操作も維持します。
+カーソル位置を編集した後の英数変換は、かなからローマ字を再生成するため、入力時と綴りが変わる場合があります。
+確定済み文字列の再変換、文節幅のShift+左右による変更、単語登録画面、キー割り当てのカスタマイズは未対応です。
+
 ## 設定
 
 配布元の設定ファイルは[`config/ime_settings.json`](config/ime_settings.json)です。
@@ -292,21 +328,19 @@ provider.kana.mode                         = "mozc"
 provider.kana.mozc.transport               = "bridge"
 provider.kana.mozc.kana_kanji_only_mode    = false
 provider.translation.mode                  = "llm"
-provider.translation.llm.model             = "default"
+provider.translation.llm.model             = "plamo-3-translate:2b"
 provider.translation.llm.timeout_ms        = 3000
 provider.translation.llm.warmup_on_activate = true
 ```
 
 ### Ollamaモデルを変更する
 
-#### 推奨：`default`エイリアスの実体を変更する
+#### 汎用モデルへ切り替える
 
-別のモデルを使う場合は、そのモデルを取得して`default`エイリアスを作成します。
-RTASの設定変更や再ビルドは不要です。
+別のモデルを取得し、次節の設定ファイルでモデル名を変更します。再ビルドは不要です。
 
 ```powershell
 ollama pull llama3.1
-ollama cp llama3.1 default
 ollama list
 ```
 
@@ -332,6 +366,11 @@ ollama list
 
 リポジトリ直下の`config\ime_settings.json`を編集した場合は、
 「実行時設定を配置」のコピーコマンドを再実行してください。
+
+PLaMoはモデル名に`plamo-3-translate`を含めてください。RTASがこの名前を判別し、
+日本語から英語へのPFML3プロンプト、`raw=true`、専用の停止トークンを送ります。
+`default`など別名へコピーすると判別できません。その他のモデルは従来の翻訳指示を使います。
+原文や文脈に予約文字列`<|plamo:`が含まれる場合は、入力形式への混入を防ぐためエラーにします。
 
 #### 環境変数で一時的に上書きする
 
@@ -373,7 +412,7 @@ ollama list
 ```
 
 - Ollamaが起動していることを確認します。
-- `ollama list`に、設定したモデルまたは`default:latest`があることを確認します。
+- `ollama list`に、設定したモデル（既定は`plamo-3-translate:2b`）があることを確認します。
 - `Shift + 半角/全角`でかな漢字変換専用モードになっていないことを確認します。
 - `provider.translation.mode`が`llm`になっていることを確認します。
 
@@ -399,6 +438,15 @@ RTASは有効化時にモデルをウォームアップし、無効化から10�
   /p:Platform=x64
 
 .\tests\unit\x64\Release\Ime3Tests.exe
+```
+
+PLaMoモデルを準備済みの場合は、次の追加テストで実際の翻訳・文脈の反映・キャンセルを確認できます。
+ウォームアップ後は既定と同じ3秒タイムアウトで短文3件を翻訳します。
+
+```powershell
+$env:IME3_TEST_PLAMO = "1"
+.\tests\unit\x64\Release\Ime3Tests.exe
+Remove-Item Env:IME3_TEST_PLAMO
 ```
 
 IME固有の操作やOllama障害時の挙動は、[`tests/manual`](tests/manual)の

@@ -77,6 +77,11 @@ struct OllamaLifecycleResult {
     std::wstring rawPayload;
 };
 
+// Returns an empty body if source/context contains reserved PLaMo delimiters.
+std::string BuildTranslationRequestBody(const std::wstring& model,
+    const std::wstring& reading, const std::wstring& context,
+    const std::wstring& keepAlive);
+
 TranslationResult ExecuteTranslationJob(uint64_t id,
     const std::wstring& reading,
     const std::wstring& context,

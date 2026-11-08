@@ -36,6 +36,11 @@ SOFTWARE.
 Google日本語入力、Ollama、利用者がローカルで選択するOllamaモデルは、
 実行時に別途必要となる外部ソフトウェアです。このリポジトリには複製していません。
 
+既定の翻訳モデルはPreferred NetworksのPLaMo 3 Translate 2B（公式GGUF Q4_K_M）です。
+重みは同梱せず、利用者がOllama経由で別途取得します。適用条件は
+[PLaMoコミュニティライセンス](https://plamo.preferredai.jp/info/plamo-community-license-ja)、
+取得元と利用方法は[公式モデルカード](https://huggingface.co/pfnet/plamo-3-translate-2b-GGUF)を参照してください。
+
 辞書準備スクリプトは、利用者が別途入手したコーパスを処理できます。ただし、
 公開ポートフォリオのスナップショットに含めているのは、作者が作成した
 サンプルTSV行だけです。コーパスを生成または再配布する場合は、そのコーパス固有の

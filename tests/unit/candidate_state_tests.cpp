@@ -4,6 +4,7 @@
 #include "../../Ime3/rtas_candidate_request.h"
 #include "../../Ime3/rtas_layer_state.h"
 #include "../../Ime3/rtas_translation.h"
+#include "../../Ime3/rtas_utils.h"
 #include "../../src/provider/mozc_conversion_provider.h"
 
 bool RunCandidateStateTests() {
@@ -16,12 +17,62 @@ bool RunCandidateStateTests() {
     };
 
     LayerState state;
+    for (UINT key : {'A', 'C', 'V', 'X', 'Z', 'Y', 'S', 'F'}) {
+        expect(NormalizeImeShortcut(key, MOD_CONTROL, true) == 0,
+               "application Ctrl shortcuts pass through even during composition");
+    }
+    expect(NormalizeImeShortcut('T', MOD_CONTROL, false) == 0, "Ctrl+T opens an application tab outside composition");
+    expect(NormalizeImeShortcut('T', MOD_CONTROL, true) == VK_F10, "Ctrl+T converts active input");
+    expect(NormalizeImeShortcut('U', MOD_CONTROL, true) == VK_F6, "Ctrl+U aliases F6");
+    expect(NormalizeImeShortcut('I', MOD_CONTROL, true) == VK_F7, "Ctrl+I aliases F7");
+    expect(NormalizeImeShortcut('O', MOD_CONTROL, true) == VK_F8, "Ctrl+O aliases F8");
+    expect(NormalizeImeShortcut('P', MOD_CONTROL, true) == VK_F9, "Ctrl+P aliases F9");
+    expect(NormalizeImeShortcut('T', MOD_CONTROL | MOD_SHIFT, true) == 0, "Ctrl+Shift+T remains an application shortcut");
+    expect(NormalizeImeShortcut(VK_SPACE, MOD_CONTROL, true) == VK_SPACE, "Ctrl+Space inserts a literal space");
+    expect(NormalizeImeShortcut(VK_TAB, MOD_CONTROL | MOD_SHIFT, true) == VK_TAB, "reverse tab shortcut preserved");
+    expect(NormalizeImeShortcut(VK_F4, MOD_ALT, true) == 0, "Alt+F4 is never swallowed");
+    expect(NormalizeImeShortcut(VK_F10, MOD_SHIFT, true) == 0, "Shift+F10 preserves the application context menu");
+    expect(NormalizeImeShortcut('L', MOD_WIN, true) == 0, "Windows shortcuts pass through");
+    expect(NormalizeImeShortcut(VK_OEM_3, MOD_ALT, false) == VK_KANJI, "US keyboard Alt+backtick toggles IME");
+    expect(NormalizeImeShortcut(VK_CAPITAL, MOD_CONTROL, false) == VK_DBE_HIRAGANA, "Ctrl+CapsLock enables Japanese input");
+    expect(ConvertCharacterForm(L"ｶﾞギＡ", VK_F6) == L"がぎＡ", "F6 handles half-width voiced kana");
+    expect(ConvertCharacterForm(L"がぎぐ", VK_F7) == L"ガギグ", "F7 converts to katakana");
+    expect(ConvertCharacterForm(L"ぱぴぷ", VK_F8) == L"ﾊﾟﾋﾟﾌﾟ", "F8 handles expanding voiced kana");
+    expect(ConvertCharacterForm(L"nihon 123", VK_F9) == L"ｎｉｈｏｎ　１２３", "F9 produces full-width Latin input");
+    expect(ConvertCharacterForm(L"ＡＢＣ１２３", VK_F10) == L"ABC123", "F10 produces half-width Latin input");
+    expect(ConvertCharacterForm(L"hello world", VK_F10, 1) == L"HELLO WORLD", "repeated F10 can uppercase");
+    expect(ConvertCharacterForm(L"HELLO WORLD", VK_F10, 2) == L"Hello World", "repeated F10 can capitalize words");
+    expect(ConvertCharacterForm(L"", VK_F7).empty(), "empty form conversion is safe");
+    std::wstring roman;
+    std::wstring converted;
+    for (wchar_t ch : std::wstring(L"konnichiha")) {
+        roman += ch;
+        converted += ConvertRomajiBuffer(roman, false);
+    }
+    converted += ConvertRomajiBuffer(roman, true);
+    expect(converted == L"こんにちは" && roman.empty(), "shared converter preserves incremental romaji input");
+    roman = L"gakkou";
+    expect(ConvertRomajiBuffer(roman, true) == L"がっこう", "shared converter preserves doubled consonants");
+    roman = RomajiFromKana(L"しゃしん がっこう");
+    expect(ConvertRomajiBuffer(roman, true) == L"しゃしん がっこう", "edited kana can regenerate valid romaji");
+    const std::wstring emoji = L"a\U0001F600b";
+    expect(MoveTextOffset(emoji, 1, 1) == 3 && MoveTextOffset(emoji, 3, -1) == 1,
+           "caret and delete never split a UTF-16 surrogate pair");
+    expect(MoveTextOffset(emoji, 0, -1) == 0 && MoveTextOffset(emoji, 4, 1) == 4, "caret stays within text boundaries");
+    expect(CandidatePageStart(9) == 9 && CandidatePageStart(19) == 18, "last partial page has stable numbering");
+    expect(CandidatePageSelection(0, 20, -1) == 18, "PageUp wraps to the last page");
+    expect(CandidatePageSelection(17, 20, 1) == 19, "PageDown clamps within the last page");
+    expect(CandidatePageSelection(8, 10, 1) == 9 && CandidatePageSelection(9, 10, 1) == 0, "partial pages remain navigable");
+    expect(CandidatePageSelection(0, 0, -1) == 0, "empty candidate list is safe");
     expect(state.OnEnter(false, true) == CandidateEnterAction::HoldInLayer2,
            "Layer1 Enter holds Japanese in Layer2 without committing");
     expect(state.OnEnter(true, true) == CandidateEnterAction::HoldInLayer2,
            "Layer1 Shift+Enter also retains the draft");
     expect(state.OnEnter(false, false) == CandidateEnterAction::CommitJapanese,
            "kana-kanji-only mode commits Japanese");
+    roman = L"ga";
+    expect(ConvertRomajiBuffer(roman, true) == L"が" && roman.empty(),
+           "kana-only Enter draft is ga -> が; kanji conversion is not a romaji operation");
     state.tab = CandidateTab::Layer2;
     state.SetPendingCarry(true);
     expect(state.HasPendingCarry(), "Layer2 permits continued draft editing");

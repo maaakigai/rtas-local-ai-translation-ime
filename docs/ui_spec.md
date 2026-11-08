@@ -43,6 +43,11 @@
 
 ## エラー表示
 
+編集・文字種変換・候補ページ操作のキー一覧は[READMEのキー操作](../README.md#キー操作)を参照してください。
+未確定文中のCtrl+Spaceは半角空白、Ctrl+Shift+Spaceは全角空白を挿入します。
+候補番号はページごとに1〜9を表示し、数字キーで選択してEnterと同じレイヤー操作を行います。
+Ctrl+Tab／Ctrl+Shift+Tabは、日本語・言い換え・翻訳の利用可能なタブを順／逆順に移動します。
+
 - Translation：`! 翻訳に失敗しました (Shift+Spaceで再試行)`
 - Layer 2：`! 言い換え候補なし (Shift+EnterでLayer1へ戻る)`
 

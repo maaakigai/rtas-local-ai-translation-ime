@@ -1,0 +1,3 @@
+FROM hf.co/pfnet/plamo-3-translate-2b-GGUF:Q4_K_M
+# CPU avoids a slow GPU path observed with PLaMo 0.8B on the development RTX 3060 Ti.
+PARAMETER num_gpu 0

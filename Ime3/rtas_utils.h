@@ -27,4 +27,13 @@ KanaModeCommand ClassifyKanaKey(UINT vkey, UINT toggleVk);
 KanaModeCommand CommandFromPreservedGuid(REFGUID guid, UINT toggleVk);
 const wchar_t* MapFullWidthSymbol(UINT vkey, bool shiftPressed);
 const wchar_t* MapHalfWidthSymbol(UINT vkey, bool shiftPressed);
+UINT GetImeKeyModifiers();
+// Returns 0 for an application shortcut; normalizes supported IME aliases.
+UINT NormalizeImeShortcut(UINT key, UINT modifiers, bool hasInput);
+std::wstring ConvertRomajiBuffer(std::wstring& buffer, bool finalize);
+std::wstring RomajiFromKana(const std::wstring& text);
+std::wstring ConvertCharacterForm(const std::wstring& text, UINT functionKey, int letterCase = 0);
+size_t MoveTextOffset(const std::wstring& text, size_t offset, int direction);
+int CandidatePageStart(int selection);
+int CandidatePageSelection(int selection, int count, int direction);
 

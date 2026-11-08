@@ -35,7 +35,7 @@
     "translation": {
       "mode": "llm",
       "llm": {
-        "model": "default",
+        "model": "plamo-3-translate:2b",
         "host": "127.0.0.1",
         "port": 11434,
         "path": "/api/generate",

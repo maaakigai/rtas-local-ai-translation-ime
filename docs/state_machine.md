@@ -39,7 +39,8 @@ stateDiagram-v2
 | Translation | Escape | リクエストを無効化し、Layer1 へ戻る |
 | Layer2 | Escape | リクエストを無効化し、Layer1 へ戻る |
 
-かな漢字変換専用モード、または Layer2 非対応のプロバイダーでは、Layer1 の Enter で日本語を確定する。
+かな漢字変換専用モード、または Layer2 非対応のプロバイダーでは、候補を開いていない Enter は表示中の入力をそのまま確定する。
+例：`ga`→Enter は「が」を確定し、自動で先頭の漢字候補へ変換しない。Space で候補を開いた後の Enter は選択中の候補を確定する。
 入力中の Enter は TextService のキー処理から Layer2 へ進む。候補 UI が開いているときの Enter の判断は LayerState が担当する。
 Layer2 で翻訳が利用できない場合、Space は取得済みの日本語候補を巡回する。
 Layer1 の Escape は現在の composition と候補 UI を閉じる。

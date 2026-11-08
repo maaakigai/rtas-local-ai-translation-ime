@@ -21,6 +21,86 @@ extern const GUID GUID_Preserved_DBE_SBCSCHAR;
 extern const GUID GUID_Preserved_DBE_DBCSCHAR;
 extern const GUID GUID_Preserved_DBE_ROMAN;
 
+UINT GetImeKeyModifiers() {
+    return ((GetKeyState(VK_SHIFT) & 0x8000) ? MOD_SHIFT : 0) |
+        ((GetKeyState(VK_CONTROL) & 0x8000) ? MOD_CONTROL : 0) |
+        ((GetKeyState(VK_MENU) & 0x8000) ? MOD_ALT : 0) |
+        (((GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) ? MOD_WIN : 0);
+}
+
+UINT NormalizeImeShortcut(UINT key, UINT modifiers, bool hasInput) {
+    if (modifiers & MOD_WIN) return 0;
+    if (modifiers & MOD_ALT) return modifiers == MOD_ALT && key == VK_OEM_3 ? VK_KANJI : 0;
+    if (!(modifiers & MOD_CONTROL)) {
+        if ((modifiers & MOD_SHIFT) && key >= VK_F6 && key <= VK_F10) return 0;
+        return key;
+    }
+    if (modifiers == MOD_CONTROL && key == VK_CAPITAL) return VK_DBE_HIRAGANA;
+    if (!hasInput) return 0;
+    if (key == VK_SPACE || key == VK_TAB) return key;
+    if (modifiers & MOD_SHIFT) return 0;
+    switch (key) {
+    case 'U': return VK_F6;
+    case 'I': return VK_F7;
+    case 'O': return VK_F8;
+    case 'P': return VK_F9;
+    case 'T': return VK_F10;
+    default: return 0;
+    }
+}
+
+size_t MoveTextOffset(const std::wstring& text, size_t offset, int direction) {
+    offset = (std::min)(offset, text.size());
+    if (direction < 0 && offset > 0) {
+        --offset;
+        if (offset > 0 && text[offset] >= 0xDC00 && text[offset] <= 0xDFFF &&
+            text[offset - 1] >= 0xD800 && text[offset - 1] <= 0xDBFF) --offset;
+    } else if (direction > 0 && offset < text.size()) {
+        const wchar_t first = text[offset++];
+        if (first >= 0xD800 && first <= 0xDBFF && offset < text.size() &&
+            text[offset] >= 0xDC00 && text[offset] <= 0xDFFF) ++offset;
+    }
+    return offset;
+}
+
+int CandidatePageStart(int selection) { return (std::max)(0, selection) / 9 * 9; }
+
+int CandidatePageSelection(int selection, int count, int direction) {
+    if (count <= 0) return 0;
+    const int pages = (count + 8) / 9;
+    const int page = ((selection / 9 + direction) % pages + pages) % pages;
+    return (std::min)(page * 9 + selection % 9, count - 1);
+}
+
+std::wstring ConvertCharacterForm(const std::wstring& text, UINT functionKey, int letterCase) {
+    if (text.empty()) return {};
+    DWORD flags = 0;
+    switch (functionKey) {
+    case VK_F6: flags = LCMAP_HIRAGANA | LCMAP_FULLWIDTH; break;
+    case VK_F7: flags = LCMAP_KATAKANA | LCMAP_FULLWIDTH; break;
+    case VK_F8: flags = LCMAP_KATAKANA | LCMAP_HALFWIDTH; break;
+    case VK_F9: flags = LCMAP_FULLWIDTH; break;
+    case VK_F10: flags = LCMAP_HALFWIDTH; break;
+    default: return text;
+    }
+    std::wstring source = text;
+    if (functionKey == VK_F9 || functionKey == VK_F10) {
+        if (letterCase > 0) {
+            bool wordStart = true;
+            for (auto& ch : source) {
+                const bool letter = iswalpha(ch) != 0;
+                ch = letterCase == 1 || (letterCase == 2 && wordStart) ? towupper(ch) : towlower(ch);
+                wordStart = !letter;
+            }
+        }
+    }
+    const int size = LCMapStringEx(L"ja-JP", flags, source.data(), static_cast<int>(source.size()), nullptr, 0, nullptr, nullptr, 0);
+    if (size <= 0) return text;
+    std::wstring result(size, L'\0');
+    if (!LCMapStringEx(L"ja-JP", flags, source.data(), static_cast<int>(source.size()), result.data(), size, nullptr, nullptr, 0)) return text;
+    return result;
+}
+
 namespace {
 
 std::mutex g_debugLogMutex;
@@ -426,3 +506,146 @@ const wchar_t* MapHalfWidthSymbol(UINT vkey, bool shiftPressed) {
 }
 
 
+
+namespace {
+static bool IsVowel(wchar_t c) { return c==L'a'||c==L'i'||c==L'u'||c==L'e'||c==L'o'; }
+static bool IsConsonant(wchar_t c) { return (c>=L'a'&&c<=L'z') && !IsVowel(c); }
+    struct Map { const wchar_t* roma; const wchar_t* hira; };
+    static const Map map4[] = {
+        {L"ltsu",L"っ"},
+    };
+    static const Map map3[] = {
+        {L"kya",L"きゃ"},{L"kyu",L"きゅ"},{L"kyo",L"きょ"},
+        {L"kwa",L"くぁ"},{L"kwi",L"くぃ"},{L"kwu",L"くぅ"},{L"kwe",L"くぇ"},{L"kwo",L"くぉ"},
+        {L"gya",L"ぎゃ"},{L"gyu",L"ぎゅ"},{L"gyo",L"ぎょ"},
+        {L"gwa",L"ぐぁ"},{L"gwi",L"ぐぃ"},{L"gwu",L"ぐぅ"},{L"gwe",L"ぐぇ"},{L"gwo",L"ぐぉ"},
+        {L"sha",L"しゃ"},{L"shu",L"しゅ"},{L"sho",L"しょ"},
+        {L"she",L"しぇ"},
+        {L"sya",L"しゃ"},{L"syu",L"しゅ"},{L"syo",L"しょ"},
+        {L"jya",L"じゃ"},{L"jyu",L"じゅ"},{L"jyo",L"じょ"},
+        {L"cha",L"ちゃ"},{L"chu",L"ちゅ"},{L"cho",L"ちょ"},
+        {L"che",L"ちぇ"},
+        {L"tya",L"ちゃ"},{L"tyu",L"ちゅ"},{L"tyo",L"ちょ"},
+        {L"thi",L"てぃ"},
+        {L"cya",L"ちゃ"},{L"cyu",L"ちゅ"},{L"cyo",L"ちょ"},
+        {L"tsa",L"つぁ"},{L"tsi",L"つぃ"},{L"tse",L"つぇ"},{L"tso",L"つぉ"},
+        {L"xtu",L"っ"},{L"ltu",L"っ"},
+        {L"xya",L"ゃ"},{L"xyu",L"ゅ"},{L"xyo",L"ょ"},
+        {L"lya",L"ゃ"},{L"lyu",L"ゅ"},{L"lyo",L"ょ"},
+        {L"nya",L"にゃ"},{L"nyu",L"にゅ"},{L"nyo",L"にょ"},
+        {L"hya",L"ひゃ"},{L"hyu",L"ひゅ"},{L"hyo",L"ひょ"},
+        {L"fya",L"ふゃ"},{L"fyu",L"ふゅ"},{L"fyo",L"ふょ"},
+        {L"bya",L"びゃ"},{L"byu",L"びゅ"},{L"byo",L"びょ"},
+        {L"pya",L"ぴゃ"},{L"pyu",L"ぴゅ"},{L"pyo",L"ぴょ"},
+        {L"mya",L"みゃ"},{L"myu",L"みゅ"},{L"myo",L"みょ"},
+        {L"rya",L"りゃ"},{L"ryu",L"りゅ"},{L"ryo",L"りょ"},
+        {L"vya",L"ゔゃ"},{L"vyi",L"ゔぃ"},{L"vyu",L"ゔゅ"},{L"vye",L"ゔぇ"},{L"vyo",L"ゔょ"},
+        {L"shi",L"し"},{L"chi",L"ち"},{L"tsu",L"つ"},
+        {L"dya",L"ぢゃ"},{L"dyu",L"ぢゅ"},{L"dyo",L"ぢょ"},
+        {L"dhi",L"でぃ"},
+    };
+    static const Map map2[] = {
+        {L"ka",L"か"},{L"ki",L"き"},{L"ku",L"く"},{L"ke",L"け"},{L"ko",L"こ"},
+        {L"ga",L"が"},{L"gi",L"ぎ"},{L"gu",L"ぐ"},{L"ge",L"げ"},{L"go",L"ご"},
+        {L"sa",L"さ"},{L"si",L"し"},{L"su",L"す"},{L"se",L"せ"},{L"so",L"そ"},
+        {L"ja",L"じゃ"},{L"ji",L"じ"},{L"ju",L"じゅ"},{L"je",L"じぇ"},{L"jo",L"じょ"},
+        {L"za",L"ざ"},{L"zi",L"じ"},{L"zu",L"ず"},{L"ze",L"ぜ"},{L"zo",L"ぞ"},
+        {L"ta",L"た"},{L"ti",L"ち"},{L"tu",L"つ"},{L"te",L"て"},{L"to",L"と"},
+        {L"da",L"だ"},{L"di",L"ぢ"},{L"du",L"づ"},{L"de",L"で"},{L"do",L"ど"},
+        {L"na",L"な"},{L"ni",L"に"},{L"nu",L"ぬ"},{L"ne",L"ね"},{L"no",L"の"},
+        {L"ha",L"は"},{L"hi",L"ひ"},{L"hu",L"ふ"},{L"he",L"へ"},{L"ho",L"ほ"},
+        {L"ba",L"ば"},{L"bi",L"び"},{L"bu",L"ぶ"},{L"be",L"べ"},{L"bo",L"ぼ"},
+        {L"pa",L"ぱ"},{L"pi",L"ぴ"},{L"pu",L"ぷ"},{L"pe",L"ぺ"},{L"po",L"ぽ"},
+        {L"ma",L"ま"},{L"mi",L"み"},{L"mu",L"む"},{L"me",L"め"},{L"mo",L"も"},
+        {L"ya",L"や"},{L"yu",L"ゆ"},{L"yo",L"よ"},
+        {L"ye",L"いぇ"},
+        {L"ra",L"ら"},{L"ri",L"り"},{L"ru",L"る"},{L"re",L"れ"},{L"ro",L"ろ"},
+        {L"wa",L"わ"},{L"wo",L"を"},
+        {L"wi",L"うぃ"},{L"wu",L"う"},{L"we",L"うぇ"},
+        {L"qa",L"くぁ"},{L"qi",L"くぃ"},{L"qu",L"く"},{L"qe",L"くぇ"},{L"qo",L"くぉ"},
+        {L"va",L"ゔぁ"},{L"vi",L"ゔぃ"},{L"vu",L"ゔ"},{L"ve",L"ゔぇ"},{L"vo",L"ゔぉ"},
+        {L"la",L"ぁ"},{L"li",L"ぃ"},{L"lu",L"ぅ"},{L"le",L"ぇ"},{L"lo",L"ぉ"},
+        {L"xa",L"ぁ"},{L"xi",L"ぃ"},{L"xu",L"ぅ"},{L"xe",L"ぇ"},{L"xo",L"ぉ"},
+        {L"nn",L"ん"},
+        {L"fa",L"ふぁ"},{L"fi",L"ふぃ"},{L"fu",L"ふ"},{L"fe",L"ふぇ"},{L"fo",L"ふぉ"},
+    };
+    static const Map map1[] = {
+        {L"a",L"あ"},{L"i",L"い"},{L"u",L"う"},{L"e",L"え"},{L"o",L"お"},
+        {L"n",L"ん"},
+    };
+
+} // namespace
+
+std::wstring ConvertRomajiBuffer(std::wstring& buffer, bool finalize) {
+    std::wstring out;
+    auto emit = [&](const wchar_t* s) { out.append(s); };
+    auto consume = [&](size_t n) { buffer.erase(0, n); };
+    while (!buffer.empty()) {
+        if (buffer.size() >= 2 && buffer[0] == buffer[1] && IsConsonant(buffer[0]) && buffer[0] != L'n') {
+            emit(L"っ"); consume(1); continue;
+        }
+        if (buffer[0] == L'n') {
+            if (buffer.size() >= 2) {
+                wchar_t n2 = buffer[1];
+                if (n2 == L'\'') { emit(L"ん"); consume(2); continue; }
+                if (n2 == L'y' && buffer.size() < 3) { break; }
+                if (n2 == L'n') {
+                    if (buffer.size() == 2 && !finalize) break;
+                    if (buffer.size() >= 3) {
+                        wchar_t n3 = buffer[2];
+                        if (IsVowel(n3) || n3 == L'y') { emit(L"ん"); consume(1); continue; }
+                    }
+                    emit(L"ん"); consume(2); continue;
+                }
+                if (!IsVowel(n2) && n2 != L'y') { emit(L"ん"); consume(1); continue; }
+            } else {
+                if (finalize) { emit(L"ん"); consume(1); continue; }
+                break;
+            }
+        }
+        bool matched = false;
+        if (buffer.size() >= 4) {
+            for (const auto& m : map4) { if (buffer.rfind(m.roma, 0) == 0) { emit(m.hira); consume(4); matched = true; break; } }
+            if (matched) continue;
+        }
+        if (buffer.size() >= 3) {
+            for (const auto& m : map3) { if (buffer.rfind(m.roma, 0) == 0) { emit(m.hira); consume(3); matched = true; break; } }
+            if (matched) continue;
+        }
+        if (buffer.size() >= 2) {
+            for (const auto& m : map2) { if (buffer.rfind(m.roma, 0) == 0) { emit(m.hira); consume(2); matched = true; break; } }
+            if (matched) continue;
+        }
+        for (const auto& m : map1) { if (buffer.rfind(m.roma, 0) == 0) { emit(m.hira); consume(1); matched = true; break; } }
+        if (matched) continue;
+        wchar_t c0 = buffer[0];
+        if (!(c0 >= L'a' && c0 <= L'z')) { wchar_t s[2] = { c0, 0 }; emit(s); consume(1); continue; }
+        break;
+    }
+    return out;
+}
+
+std::wstring RomajiFromKana(const std::wstring& text) {
+    const std::wstring hira = ConvertCharacterForm(text, VK_F6);
+    std::wstring result;
+    for (size_t pos = 0; pos < hira.size();) {
+        const Map* best = nullptr;
+        size_t length = 0;
+        auto find = [&](const auto& entries) {
+            for (const auto& entry : entries) {
+                const size_t size = wcslen(entry.hira);
+                if (size > length && hira.compare(pos, size, entry.hira) == 0) {
+                    best = &entry;
+                    length = size;
+                }
+            }
+        };
+        find(map3); find(map2); find(map1); find(map4);
+        if (best) { result += best->roma; pos += length; }
+        else {
+            const wchar_t ch = hira[pos++];
+            result += ch == L'\u3000' ? L' ' : ch >= 0xFF01 && ch <= 0xFF5E ? static_cast<wchar_t>(ch - 0xFEE0) : ch;
+        }
+    }
+    return result;
+}

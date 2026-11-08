@@ -478,7 +478,7 @@ STDMETHODIMP CandidateUI::SetSelection(UINT nIndex) {
     if (nIndex >= m_candidates.size()) return E_INVALIDARG;
     m_selection = static_cast<int>(nIndex);
     if (m_owner) m_owner->OnCandidateSelectionChanged(SelectedString());
-    m_updatedFlags |= TF_CLUIE_SELECTION;
+    m_updatedFlags |= TF_CLUIE_SELECTION | TF_CLUIE_CURRENTPAGE;
     NotifyUpdate();
     return S_OK;
 }
@@ -517,7 +517,7 @@ void CandidateUI::NotifyUpdate() {
 void CandidateUI::MoveSelection(int delta) {
     if (m_candidates.empty()) return;
     int count = static_cast<int>(m_candidates.size());
-    int next = (m_selection + delta + count) % count;
+    int next = ((m_selection + delta) % count + count) % count;
     if (next != m_selection && m_owner) {
         m_selection = next;
         m_owner->OnCandidateSelectionChanged(SelectedString());
@@ -814,9 +814,7 @@ void CandidateUI::PaintCandidateWindow(HDC hdc) {
     const int numWidth = 22;
     const int topPad = 4;
     const int count = static_cast<int>(m_candidates.size());
-    int start = (m_selection >= 0 ? (m_selection / 9) * 9 : 0);
-    if (start < 0) start = 0;
-    if (start > std::max(0, count - 9)) start = std::max(0, count - 9);
+    const int start = CandidatePageStart(m_selection);
     const int visible = std::min(count - start, 9);
     const std::wstring commonPrefix = CommonPrefixForRange(m_candidates, start, visible);
     for (int i = 0; i < visible; ++i) {
@@ -838,7 +836,7 @@ void CandidateUI::PaintCandidateWindow(HDC hdc) {
         }
 
         wchar_t numBuf[8]{};
-        wsprintfW(numBuf, L"%d.", idx + 1);
+        wsprintfW(numBuf, L"%d.", i + 1);
         RECT rcNum = row;
         rcNum.left += padX;
         rcNum.right = rcNum.left + numWidth;
@@ -868,9 +866,7 @@ void CandidateUI::UpdateCandidateWindow() {
 
     int width = 180;
     const int count = static_cast<int>(m_candidates.size());
-    int start = (m_selection >= 0 ? (m_selection / 9) * 9 : 0);
-    if (start < 0) start = 0;
-    if (start > std::max(0, count - 9)) start = std::max(0, count - 9);
+    const int start = CandidatePageStart(m_selection);
     int visible = std::min(count - start, 9);
     m_visibleCount = visible;
     HDC hdc = GetDC(m_hwnd);

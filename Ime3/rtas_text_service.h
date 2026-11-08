@@ -221,7 +221,7 @@ public:
     friend class OverlayController;
     friend class CandidateUI;
     friend class LangBarButton;
-    std::wstring GetPreeditText() const { return DraftText() + m_romajiBuffer; }
+    std::wstring GetPreeditText() const { return PreeditText(); }
     bool HasActiveComposition() const { return m_composition != nullptr; }
     bool TryGetLastKnownCaretScreenPoint(POINT* pt) const {
         if (!pt || !m_hasLastCaretScreenPoint) return false;
@@ -343,8 +343,11 @@ public:
     STDMETHODIMP OnSetFocus(BOOL) override { return S_OK; }
     STDMETHODIMP OnTestKeyDown(ITfContext* context, WPARAM wParam, LPARAM, BOOL* eaten) override {
         if (!eaten) return S_OK;
-        const bool shiftPressed = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
-        const UINT key = static_cast<UINT>(wParam);
+        const UINT modifiers = GetImeKeyModifiers();
+        const bool shiftPressed = (modifiers & MOD_SHIFT) != 0;
+        const bool hasInput = !PreeditText().empty() || m_candidateUI;
+        const UINT key = NormalizeImeShortcut(static_cast<UINT>(wParam), modifiers, hasInput);
+        if (!key) { *eaten = FALSE; return S_OK; }
         if (shiftPressed && (key == kToggleVk || key == VK_KANA || key == VK_KANJI)) {
             *eaten = TRUE;
             return S_OK;
@@ -357,6 +360,13 @@ public:
         const bool hasActiveInput = hasPreeditText || hasUi;
         // If not in kana mode and no active composition, we don't handle keystrokes
         if (!m_kanaMode && !hasActiveInput) { *eaten = FALSE; return S_OK; }
+        if (modifiers & MOD_CONTROL) {
+            *eaten = hasActiveInput && (key != VK_TAB || hasUi);
+            return S_OK;
+        }
+        if (hasActiveInput && ((key >= VK_F6 && key <= VK_F10) || key == VK_NONCONVERT || key == VK_CONVERT ||
+            key == VK_DELETE || key == VK_HOME || key == VK_END)) { *eaten = TRUE; return S_OK; }
+        if (hasUi && (key == VK_PRIOR || key == VK_NEXT || (key >= VK_NUMPAD1 && key <= VK_NUMPAD9))) { *eaten = TRUE; return S_OK; }
         if (m_forceHalfWidthInput && hasActiveInput) {
             const bool isLetter = (wParam >= 'A' && wParam <= 'Z');
             const bool isHalfWidthSymbol = (MapHalfWidthSymbol(static_cast<UINT>(wParam), shiftPressed) != nullptr);
@@ -380,8 +390,11 @@ public:
     STDMETHODIMP OnTestKeyUp(ITfContext*, WPARAM, LPARAM, BOOL* eaten) override { if (eaten) *eaten = FALSE; return S_OK; }
     STDMETHODIMP OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, BOOL* eaten) override {
         if (eaten) *eaten = FALSE;
-        const bool shiftPressed = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
-        const UINT key = static_cast<UINT>(wParam);
+        const UINT modifiers = GetImeKeyModifiers();
+        const bool shiftPressed = (modifiers & MOD_SHIFT) != 0;
+        const UINT key = NormalizeImeShortcut(static_cast<UINT>(wParam), modifiers, !PreeditText().empty() || m_candidateUI);
+        if (!key) return S_OK;
+        wParam = key;
         if (shiftPressed && (key == kToggleVk || key == VK_KANA || key == VK_KANJI)) {
             AppendModeToastDebugLog(
                 L"OnKeyDown shift-toggle vkey=" + std::to_wstring(key) +
@@ -412,8 +425,33 @@ public:
         const bool hasPreeditText = !PreeditText().empty();
         const bool hasUi = (m_candidateUI != nullptr);
         const bool hasActiveInput = hasPreeditText || hasUi;
-        const bool ctrlPressed = (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+        const bool ctrlPressed = (modifiers & MOD_CONTROL) != 0;
         if (!m_kanaMode && !hasActiveInput) return S_OK;
+        if (ctrlPressed && key == VK_TAB && !hasUi) return S_OK;
+        if (hasActiveInput && (key >= VK_F6 && key <= VK_F10 || key == VK_NONCONVERT)) {
+            UINT form = key;
+            if (key == VK_NONCONVERT) {
+                form = shiftPressed ? (m_lastCharacterKey == VK_F9 ? VK_F10 : VK_F9)
+                    : (m_lastCharacterKey >= VK_F6 && m_lastCharacterKey < VK_F8 ? m_lastCharacterKey + 1 : VK_F6);
+            }
+            ApplyCharacterConversion(context, form);
+            if (eaten) *eaten = TRUE;
+            return S_OK;
+        }
+        m_lastCharacterKey = 0;
+        if (hasUi && !ctrlPressed && !shiftPressed && !m_layer2PendingActive && !m_translationPendingActive &&
+            ((key >= '1' && key <= '9') || (key >= VK_NUMPAD1 && key <= VK_NUMPAD9))) {
+            const int digit = key >= VK_NUMPAD1 ? key - VK_NUMPAD1 : key - '1';
+            const int index = CandidatePageStart(m_candidateUI->SelectionIndex()) + digit;
+            UINT count = 0;
+            m_candidateUI->GetCount(&count);
+            if (index < static_cast<int>(count)) {
+                m_candidateUI->SetSelection(index);
+                HandleTabEnter(context, false);
+            }
+            if (eaten) *eaten = TRUE;
+            return S_OK;
+        }
         auto promoteLayer1ToOrangeBeforeTyping = [&]() {
             if (!m_layer1SpaceTriggered) {
                 if (m_candidateUI) {
@@ -470,16 +508,20 @@ public:
         }
         auto appendDirectText = [&](const std::wstring& text, bool keepHalfWidthMode) {
             if (text.empty()) return false;
-            ResetCompositionCaretToEnd();
+            if (m_compositionSelectionAnchor != std::wstring::npos) {
+                PrepareDraftForEditing();
+                DeleteDraftSelection();
+            }
+            RecordInputKeys(text);
+            if (m_compositionCaretOffset != std::wstring::npos && m_candidateUI) PrepareDraftForEditing();
             if (m_candidateUI) {
                 promoteLayer1ToOrangeBeforeTyping();
                 const bool preserveCarry = HasLayer2LockedCarry();
                 CloseCandidateUI(preserveCarry);
             }
-            std::wstring flushed = ConvertRomaji(true);
-            if (!flushed.empty()) DraftText().append(flushed);
-            m_romajiBuffer.clear();
-            DraftText().append(text);
+            const std::wstring flushed = FlushPendingRomaji();
+            InsertDraftText(text);
+            m_inputHistoryReading = PreeditText();
             if (keepHalfWidthMode) {
                 m_forceHalfWidthInput = true;
                 m_forceHalfWidthOutstanding += text.size();
@@ -516,6 +558,12 @@ public:
             if (eaten) *eaten = TRUE;
             return true;
         };
+        if (ctrlPressed && key == VK_SPACE && hasActiveInput) {
+            PrepareDraftForEditing();
+            appendDirectText(shiftPressed ? L"\u3000" : L" ", false);
+            if (eaten) *eaten = TRUE;
+            return S_OK;
+        }
         if (m_forceHalfWidthInput && hasActiveInput && !ctrlPressed) {
             std::wstring direct;
             if (wParam == VK_SPACE) {
@@ -560,84 +608,29 @@ public:
             }
             return S_OK;
         }
-        if (wParam == VK_BACK) {
-            if (hasPreeditText || hasUi) {
-                ResetCompositionCaretToEnd();
-                if (m_candidateUI) {
-                    const bool inOrangeLayer = IsOrangeEditingState();
-                    if (inOrangeLayer) {
-                        // Backspace in orange layer edits the orange text directly
-                        // instead of cancelling back to blue/kana preview.
-                        FinalizeLayer2BeforeNewInput(context);
-                        if (m_candidateUI && m_layerState.tab == CandidateTab::Layer2) {
-                            MergeLayer2Selection(context);
-                        }
-                        if (IsLayer1MergedFromLayer2() && !m_layer2LockedPrefix.empty()) {
-                            m_layer2MergedCarryOpen = true;
-                            SetLayer1Merged(false);
-                        }
-                        const bool preserveCarry = HasLayer2LockedCarry();
-                        CloseCandidateUI(preserveCarry);
-                        if (!m_romajiBuffer.empty()) {
-                            m_romajiBuffer.pop_back();
-                        } else if (!DraftText().empty()) {
-                            const wchar_t deleted = DraftText().back();
-                            DraftText().pop_back();
-                            OnReadingCharDeleted(deleted);
-                            if (HasLayer2LockedCarry()) {
-                                if (m_layer2LockedPrefix.size() > DraftText().size()) {
-                                    m_layer2LockedPrefix.resize(DraftText().size());
-                                }
-                                if (m_layer2LockedPrefix.empty() ||
-                                    DraftText().size() < m_layer2LockedPrefix.size() ||
-                                    DraftText().compare(0, m_layer2LockedPrefix.size(), m_layer2LockedPrefix) != 0) {
-                                    ClearLayer2LockedCarry();
-                                }
-                            }
-                        }
-                        const std::wstring preedit = PreeditText();
-                        if (preedit.empty()) {
-                            CancelComposition(context);
-                        } else {
-                            EnsureComposition(context);
-                            if (m_composition) UpdateCompositionText(context, preedit);
-                        }
-                        UpdateOverlayFromState();
-                        if (eaten) *eaten = TRUE;
-                        return S_OK;
-                    }
-                    const bool preserveCarry = HasLayer2LockedCarry();
-                    CloseCandidateUI(preserveCarry);
-                    const std::wstring preedit = PreeditText();
-                    if (preedit.empty()) {
-                        CancelComposition(context);
-                    } else {
-                        EnsureComposition(context);
-                        if (m_composition) UpdateCompositionText(context, preedit);
-                    }
-                    UpdateOverlayFromState();
-                    if (eaten) *eaten = TRUE;
-                    return S_OK;
-                }
-                if (!m_romajiBuffer.empty()) {
+        if (wParam == VK_BACK || wParam == VK_DELETE) {
+            if (!hasActiveInput) return S_OK;
+            if (wParam == VK_BACK && m_candidateUI && !IsOrangeEditingState() &&
+                m_layerState.tab == CandidateTab::Layer1 && m_compositionCaretOffset == std::wstring::npos) {
+                CloseCandidateUI(HasLayer2LockedCarry());
+            } else {
+                PrepareDraftForEditing();
+                if (wParam == VK_BACK && !m_romajiBuffer.empty()) {
                     m_romajiBuffer.pop_back();
-                } else if (StepBackLockedPrefixBoundary()) {
-                    // Deleted one char from locked Layer2 prefix.
-                } else if (!DraftText().empty()) {
-                    const wchar_t deleted = DraftText().back();
-                    DraftText().pop_back();
-                    OnReadingCharDeleted(deleted);
-                }
-                const std::wstring preedit = PreeditText();
-                if (preedit.empty()) {
-                    CancelComposition(context);
                 } else {
-                    EnsureComposition(context);
-                    if (m_composition) UpdateCompositionText(context, preedit);
+                    FlushPendingRomaji();
+                    if (!DeleteDraftSelection()) {
+                        const size_t caret = EffectiveCompositionCaretOffset(DraftText().size());
+                        const size_t other = MoveTextOffset(DraftText(), caret, wParam == VK_BACK ? -1 : 1);
+                        const size_t start = (std::min)(caret, other);
+                        for (size_t pos = start; pos < (std::max)(caret, other); ++pos) OnReadingCharDeleted(DraftText()[pos]);
+                        DraftText().erase(start, (std::max)(caret, other) - start);
+                        m_compositionCaretOffset = start;
+                    }
                 }
-                UpdateOverlayFromState();
-                if (eaten) *eaten = TRUE;
             }
+            RefreshEditedDraft(context);
+            if (eaten) *eaten = TRUE;
             return S_OK;
         }
         if (wParam == VK_TAB && ctrlPressed) {
@@ -647,22 +640,47 @@ public:
             }
             return S_OK;
         }
+        if ((wParam == VK_PRIOR || wParam == VK_NEXT) && m_candidateUI) {
+            UINT count = 0;
+            m_candidateUI->GetCount(&count);
+            m_candidateUI->SetSelection(CandidatePageSelection(m_candidateUI->SelectionIndex(), count, wParam == VK_PRIOR ? -1 : 1));
+            if (eaten) *eaten = TRUE;
+            return S_OK;
+        }
+        if ((wParam == VK_HOME || wParam == VK_END) && hasActiveInput) {
+            PrepareDraftForEditing();
+            FlushPendingRomaji();
+            if (shiftPressed && m_compositionSelectionAnchor == std::wstring::npos)
+                m_compositionSelectionAnchor = EffectiveCompositionCaretOffset(DraftText().size());
+            if (!shiftPressed) m_compositionSelectionAnchor = std::wstring::npos;
+            m_compositionCaretOffset = wParam == VK_HOME ? 0 : DraftText().size();
+            RefreshEditedDraft(context);
+            if (eaten) *eaten = TRUE;
+            return S_OK;
+        }
         if ((wParam == VK_LEFT || wParam == VK_RIGHT) &&
-            m_candidateUI && m_layerState.tab == CandidateTab::Layer1 && m_segmentMode) {
+            !shiftPressed && m_candidateUI && m_layerState.tab == CandidateTab::Layer1 && m_segmentMode) {
             if (SetActiveSegment(wParam == VK_RIGHT ? +1 : -1)) {
                 if (eaten) *eaten = TRUE;
                 return S_OK;
             }
         }
         if ((wParam == VK_LEFT || wParam == VK_RIGHT) && hasActiveInput && m_composition) {
-            if (MoveCompositionCaret(context, wParam == VK_RIGHT ? +1 : -1)) {
+            if (!m_candidateUI) FlushPendingRomaji();
+            if (MoveCompositionCaret(context, wParam == VK_RIGHT ? +1 : -1, shiftPressed)) {
                 if (eaten) *eaten = TRUE;
                 return S_OK;
             }
         }
         if (wParam == VK_UP || wParam == VK_DOWN || wParam == VK_TAB) {
+            if (!m_candidateUI && hasActiveInput) {
+                FlushPendingRomaji();
+                OpenCandidateUI(context, DraftText());
+                if (eaten) *eaten = TRUE;
+                return S_OK;
+            }
             if (m_candidateUI) {
-                if (wParam == VK_UP) m_candidateUI->MoveSelection(-1);
+                if (wParam == VK_UP || (wParam == VK_TAB && shiftPressed)) m_candidateUI->MoveSelection(-1);
                 else m_candidateUI->MoveSelection(+1);
                 if (eaten) *eaten = TRUE;
                 return S_OK;
@@ -670,12 +688,11 @@ public:
             // No candidate UI yet: only act if we have something in-flight
             if (!hasActiveInput) return S_OK;
         }
-        if (wParam == VK_SPACE) {
+        if (wParam == VK_SPACE || wParam == VK_CONVERT) {
             if (hasActiveInput) {
                 if (!m_candidateUI) {
                     m_layer1SpaceTriggered = true;
-                    DraftText().append(ConvertRomaji(true));
-                    m_romajiBuffer.clear();
+                    FlushPendingRomaji();
                     EnsureComposition(context);
                     if (m_composition) UpdateCompositionText(context, DraftText());
                     OpenCandidateUI(context, DraftText());
@@ -758,7 +775,7 @@ public:
                         break;
                     }
                     if (advanceSelection) {
-                        m_candidateUI->MoveSelection(+1);
+                        m_candidateUI->MoveSelection(shiftPressed ? -1 : +1);
                         handled = true;
                     }
                     if (handled && eaten) *eaten = TRUE;
@@ -771,22 +788,22 @@ public:
                 if (m_candidateUI) {
                     HandleTabEnter(context, shiftPressed);
                 } else {
-                    DraftText().append(ConvertRomaji(true));
-                    m_romajiBuffer.clear();
+                    FlushPendingRomaji();
                     EnsureComposition(context);
                     if (m_composition) UpdateCompositionText(context, DraftText());
+                    if (!SupportsLayer2Flow()) {
+                        // Enter must not open conversion candidates for an unselected draft.
+                        CommitComposition(context, DraftText());
+                        if (eaten) *eaten = TRUE;
+                        return S_OK;
+                    }
                     const std::wstring enterSource = TrimWhitespace(DraftText());
                     OpenCandidateUI(context, DraftText());
                     HideOverlay();
                     if (m_candidateUI) {
-                        if (SupportsLayer2Flow()) {
-                            // Root rule: transition text for Enter is the actual
-                            // preedit text at Enter time, not a re-ranked candidate.
-                            if (!SwitchToLayer2FromLayer1(false, &enterSource)) {
-                                CommitComposition(context, DraftText());
-                            }
-                        } else {
-                            CommitCandidateSelection(context);
+                        // Preserve the displayed draft when holding it in Layer2.
+                        if (!SwitchToLayer2FromLayer1(false, &enterSource)) {
+                            CommitComposition(context, DraftText());
                         }
                     } else {
                         // Fallback: no candidates available, commit as-is.
@@ -807,7 +824,12 @@ public:
                 appendDirectText(std::wstring(1, alpha), true);
                 return S_OK;
             }
-            ResetCompositionCaretToEnd();
+            if (m_compositionSelectionAnchor != std::wstring::npos) {
+                PrepareDraftForEditing();
+                DeleteDraftSelection();
+            }
+            RecordInputKeys(std::wstring(1, static_cast<wchar_t>(towlower(static_cast<wchar_t>(wParam)))));
+            if (m_compositionCaretOffset != std::wstring::npos && m_candidateUI) PrepareDraftForEditing();
             if (m_candidateUI) {
                 promoteLayer1ToOrangeBeforeTyping();
                 const bool preserveCarry = HasLayer2LockedCarry();
@@ -818,13 +840,14 @@ public:
             if (m_romajiBuffer.size() >= m_maxRomajiBuffer) {
                 std::wstring flushed = ConvertRomaji(true);
                 if (!flushed.empty()) {
-                    DraftText().append(flushed);
+                    InsertDraftText(flushed);
                 }
                 m_romajiBuffer.clear();
             }
             m_romajiBuffer.push_back(ch);
             std::wstring newly = ConvertRomaji(false);
-            if (!newly.empty()) DraftText().append(newly);
+            if (!newly.empty()) InsertDraftText(newly);
+            m_inputHistoryReading = PreeditText();
             DebugLog(L"Key A-Z: updating composition");
             EnsureComposition(context);
             if (m_composition) {
@@ -934,6 +957,10 @@ private:
     UINT m_suppressedKanaVKey = 0;
     std::wstring m_romajiBuffer;
     std::wstring m_reading; // current preedit reading (hiragana)
+    std::wstring m_inputHistory;
+    std::wstring m_inputHistoryReading;
+    UINT m_lastCharacterKey = 0;
+    int m_characterLetterCase = 0;
     ITfComposition* m_composition = nullptr; // active composition or null
     TfGuidAtom m_gaDisplayAttrPreedit = 0;    // atom id for layer1 preedit display attribute
     TfGuidAtom m_gaDisplayAttrLayer2 = 0;     // atom id for layer2 underline attribute
@@ -996,9 +1023,101 @@ private:
     DWORD m_lastModeToastTick = 0;
     std::wstring m_lastModeToastLabel;
     // Build current preedit: converted kana + remaining romaji buffer
-    std::wstring PreeditText() const { return DraftText() + m_romajiBuffer; }
+    std::wstring PreeditText() const {
+        const size_t offset = EffectiveCompositionCaretOffset(DraftText().size());
+        return DraftText().substr(0, offset) + m_romajiBuffer + DraftText().substr(offset);
+    }
     std::wstring& DraftText() { return m_reading; }
     const std::wstring& DraftText() const { return m_reading; }
+    void InsertDraftText(const std::wstring& text) {
+        if (!text.empty()) DeleteDraftSelection();
+        const size_t offset = EffectiveCompositionCaretOffset(DraftText().size());
+        DraftText().insert(offset, text);
+        if (m_compositionCaretOffset != std::wstring::npos) m_compositionCaretOffset = offset + text.size();
+    }
+    std::wstring FlushPendingRomaji() {
+        std::wstring text = ConvertRomaji(true);
+        text += m_romajiBuffer;
+        m_romajiBuffer.clear();
+        InsertDraftText(text);
+        return text;
+    }
+    void RecordInputKeys(const std::wstring& keys) {
+        // shortcut: edits regenerate romaji from kana; retain per-character origins if exact spelling after edits is needed.
+        if (m_compositionCaretOffset != std::wstring::npos && m_compositionCaretOffset < DraftText().size()) {
+            m_inputHistory = RomajiFromKana(PreeditText());
+            const size_t offset = RomajiFromKana(PreeditText().substr(0, m_compositionCaretOffset + m_romajiBuffer.size())).size();
+            m_inputHistory.insert(offset, keys);
+        } else {
+            if (m_inputHistoryReading != PreeditText()) m_inputHistory = RomajiFromKana(PreeditText());
+            m_inputHistory += keys;
+        }
+    }
+    bool DeleteDraftSelection() {
+        if (m_compositionSelectionAnchor == std::wstring::npos) return false;
+        const size_t caret = EffectiveCompositionCaretOffset(DraftText().size());
+        const size_t anchor = (std::min)(m_compositionSelectionAnchor, DraftText().size());
+        const size_t start = (std::min)(caret, anchor);
+        for (size_t pos = start; pos < (std::max)(caret, anchor); ++pos) OnReadingCharDeleted(DraftText()[pos]);
+        DraftText().erase(start, (std::max)(caret, anchor) - start);
+        m_compositionCaretOffset = start;
+        m_compositionSelectionAnchor = std::wstring::npos;
+        return caret != anchor;
+    }
+    void PrepareDraftForEditing() {
+        if (m_candidateUI) {
+            const bool orange = IsOrangeEditingState();
+            const std::wstring text = m_candidatePreview.empty() ? PreeditText() : m_candidatePreview;
+            const size_t caret = m_compositionCaretOffset;
+            CloseCandidateUI();
+            DraftText() = text;
+            m_romajiBuffer.clear();
+            m_compositionCaretOffset = caret;
+            if (orange) {
+                m_layer2LockedPrefix = text;
+                m_layer2MergedCarryOpen = !text.empty();
+            }
+        }
+    }
+    void RefreshEditedDraft(ITfContext* context) {
+        if (HasLayer2LockedCarry()) {
+            m_layer2LockedPrefix = DraftText();
+            m_layer2MergedCarryOpen = !DraftText().empty();
+        }
+        if (PreeditText().empty()) CancelComposition(context);
+        else {
+            EnsureComposition(context);
+            if (m_composition) UpdateCompositionText(context, PreeditText());
+        }
+        UpdateOverlayFromState();
+    }
+    void ApplyCharacterConversion(ITfContext* context, UINT form) {
+        FlushPendingRomaji();
+        const std::wstring reading = ActiveDraftText();
+        if (reading.empty()) return;
+        const bool alphabet = form == VK_F9 || form == VK_F10;
+        m_characterLetterCase = alphabet && m_lastCharacterKey == form ? (m_characterLetterCase + 1) % 3 : 0;
+        const std::wstring source = alphabet ?
+            (m_inputHistoryReading == reading ? m_inputHistory : RomajiFromKana(reading)) : reading;
+        const std::wstring converted = ConvertCharacterForm(source, form, m_characterLetterCase);
+        if (!m_candidateUI) OpenCandidateUI(context, reading);
+        if (!m_candidateUI) return;
+        m_segmentMode = false;
+        m_layer1SegmentRuntime.clear();
+        m_segmentDisplayRanges.clear();
+        m_hasActiveSegmentDisplayRange = false;
+        m_layerState.tab = CandidateTab::Layer1;
+        CancelActiveTranslationRequest();
+        CancelActiveLayer2Request();
+        m_candidateReading = reading;
+        m_layer1DisplayCache.assign(1, converted);
+        m_layer1Selection = 0;
+        m_candidateUI->SetCandidates(m_layer1DisplayCache, 0, false);
+        m_candidatePreview.clear();
+        ResetCompositionCaretToEnd();
+        PreviewCandidateString(converted);
+        m_lastCharacterKey = form;
+    }
     std::wstring ActiveDraftText() const {
         return TrimWhitespace(m_candidateReading.empty() ? DraftText() : m_candidateReading);
     }
@@ -1220,8 +1339,7 @@ private:
         UpdateLangBarButtonToggle();
         DebugLog(m_kanaMode ? L"Kana mode ON" : L"Kana mode OFF");
         if (!m_kanaMode) {
-            DraftText().append(ConvertRomaji(true));
-            m_romajiBuffer.clear();
+            FlushPendingRomaji();
             if (!DraftText().empty() || m_composition) {
                 CommitComposition(context, DraftText());
             } else {
@@ -2580,33 +2698,6 @@ private:
         }
         return false;
     }
-    bool StepBackLockedPrefixBoundary() {
-        if (!HasLayer2LockedCarry()) return false;
-        if (!m_romajiBuffer.empty()) return false;
-        if (DraftText().size() < m_layer2LockedPrefix.size()) {
-            ClearLayer2LockedCarry();
-            return false;
-        }
-        if (DraftText().compare(0, m_layer2LockedPrefix.size(), m_layer2LockedPrefix) != 0) {
-            ClearLayer2LockedCarry();
-            return false;
-        }
-        const size_t tailLength = DraftText().size() - m_layer2LockedPrefix.size();
-        if (tailLength > 0) {
-            return false;
-        }
-        if (DraftText().empty()) {
-            ClearLayer2LockedCarry();
-            return false;
-        }
-        DraftText().pop_back();
-        m_layer2LockedPrefix.pop_back();
-        if (m_layer2LockedPrefix.empty()) {
-            m_layer2MergedCarryOpen = false;
-        }
-        SetLayer1Merged(false);
-        return true;
-    }
     void RefreshCandidateSourceFromDraft() {
         if (!m_candidateUI) return;
         std::wstring trimmed = ActiveDraftText();
@@ -2712,11 +2803,16 @@ private:
                 return;
             }
             if (next == CandidateTab::Layer2) {
-                if (m_layerState.tab == CandidateTab::Layer1 && SwitchToLayer2FromLayer1(false)) return;
+                if (m_layerState.tab == CandidateTab::Layer1) {
+                    if (SwitchToLayer2FromLayer1(false)) return;
+                } else {
+                    const std::wstring source = m_layer2SourceText.empty() ? m_candidateSourceText : m_layer2SourceText;
+                    if (SwitchToLayer2FromLayer1(false, &source)) return;
+                }
                 continue;
             }
             if (next == CandidateTab::Translation) {
-                if (IsLayer1MergedFromLayer2() && SwitchToTranslationTab(false)) return;
+                if (SwitchToTranslationTab(false)) return;
             }
         }
     }
@@ -2934,27 +3030,35 @@ private:
     POINT m_lastCaretScreenPoint{ 0, 0 };
     bool m_hasLastCaretScreenPoint = false;
     size_t m_compositionCaretOffset = std::wstring::npos;
+    size_t m_compositionSelectionAnchor = std::wstring::npos;
     size_t EffectiveCompositionCaretOffset(size_t textLength) const {
         if (m_compositionCaretOffset == std::wstring::npos) return textLength;
         return (std::min)(m_compositionCaretOffset, textLength);
     }
     void ResetCompositionCaretToEnd() {
         m_compositionCaretOffset = std::wstring::npos;
+        m_compositionSelectionAnchor = std::wstring::npos;
     }
     void ApplyCompositionCaretSelection(TfEditCookie ec, ITfContext* ctx, ITfRange* range, size_t textLength) {
         if (!ctx || !range) return;
         ComPtr<ITfRange> caret;
         if (FAILED(range->Clone(&caret.p)) || !caret.p) return;
         caret->Collapse(ec, TF_ANCHOR_START);
-        const size_t offset = EffectiveCompositionCaretOffset(textLength);
+        const size_t focus = EffectiveCompositionCaretOffset(textLength);
+        const size_t anchor = m_compositionSelectionAnchor == std::wstring::npos ? focus : (std::min)(m_compositionSelectionAnchor, textLength);
+        const size_t offset = (std::min)(focus, anchor);
         if (offset > 0) {
             LONG shifted = 0;
             caret->ShiftEnd(ec, static_cast<LONG>(offset), &shifted, nullptr);
             caret->Collapse(ec, TF_ANCHOR_END);
         }
+        if (focus != anchor) {
+            LONG shifted = 0;
+            caret->ShiftEnd(ec, static_cast<LONG>((std::max)(focus, anchor) - offset), &shifted, nullptr);
+        }
         TF_SELECTION sel{};
         sel.range = caret.p;
-        sel.style.ase = TF_AE_NONE;
+        sel.style.ase = focus == anchor ? TF_AE_NONE : focus < anchor ? TF_AE_START : TF_AE_END;
         sel.style.fInterimChar = FALSE;
         ctx->SetSelection(ec, 1, &sel);
 
@@ -2972,18 +3076,15 @@ private:
             }
         }
     }
-    bool MoveCompositionCaret(ITfContext* context, int delta) {
+    bool MoveCompositionCaret(ITfContext* context, int delta, bool extend) {
         if (!m_composition || delta == 0) return false;
         std::wstring text = m_candidatePreview;
         if (text.empty()) text = PreeditText();
         const size_t textLength = text.size();
         const size_t current = EffectiveCompositionCaretOffset(textLength);
-        size_t next = current;
-        if (delta < 0) {
-            if (next > 0) --next;
-        } else if (next < textLength) {
-            ++next;
-        }
+        if (extend && m_compositionSelectionAnchor == std::wstring::npos) m_compositionSelectionAnchor = current;
+        if (!extend) m_compositionSelectionAnchor = std::wstring::npos;
+        const size_t next = MoveTextOffset(text, current, delta);
         if (next == current) return true;
         m_compositionCaretOffset = next;
         UpdateCompositionText(context, text);
@@ -3518,7 +3619,7 @@ private:
                     // Nothing else to do
                 }
             }
-            DraftText().clear(); m_romajiBuffer.clear(); CloseCandidateUI(); HideOverlay();
+            DraftText().clear(); m_romajiBuffer.clear(); m_inputHistory.clear(); m_inputHistoryReading.clear(); m_lastCharacterKey = 0; CloseCandidateUI(); HideOverlay();
             ResetForceHalfWidthInput();
             return;
         }
@@ -3533,18 +3634,18 @@ private:
             (void)hr2; (void)hr2Session;
         }
         edit->Release();
-        DraftText().clear(); m_romajiBuffer.clear(); CloseCandidateUI(); HideOverlay();
+        DraftText().clear(); m_romajiBuffer.clear(); m_inputHistory.clear(); m_inputHistoryReading.clear(); m_lastCharacterKey = 0; CloseCandidateUI(); HideOverlay();
         ResetForceHalfWidthInput();
         ResetCompositionCaretToEnd();
     }
     void CancelComposition(ITfContext* context) {
         if (m_composition) { CommitComposition(context, L""); }
-        DraftText().clear(); m_romajiBuffer.clear(); CloseCandidateUI(); HideOverlay();
+        DraftText().clear(); m_romajiBuffer.clear(); m_inputHistory.clear(); m_inputHistoryReading.clear(); m_lastCharacterKey = 0; CloseCandidateUI(); HideOverlay();
         ResetForceHalfWidthInput();
         ResetCompositionCaretToEnd();
     }
     // ITfCompositionSink
-    STDMETHODIMP OnCompositionTerminated(TfEditCookie, ITfComposition*) override { if (m_composition) { m_composition->Release(); m_composition = nullptr; } DraftText().clear(); m_romajiBuffer.clear(); ResetForceHalfWidthInput(); CloseCandidateUI(); HideOverlay(); ResetCompositionCaretToEnd(); return S_OK; }
+    STDMETHODIMP OnCompositionTerminated(TfEditCookie, ITfComposition*) override { if (m_composition) { m_composition->Release(); m_composition = nullptr; } DraftText().clear(); m_romajiBuffer.clear(); m_inputHistory.clear(); m_inputHistoryReading.clear(); m_lastCharacterKey = 0; ResetForceHalfWidthInput(); CloseCandidateUI(); HideOverlay(); ResetCompositionCaretToEnd(); return S_OK; }
     TfGuidAtom CurrentDisplayAttributeAtom() const {
         if ((m_layerState.tab == CandidateTab::Translation) || m_translationPendingActive) {
             if (m_gaDisplayAttrTranslation) return m_gaDisplayAttrTranslation;
@@ -3885,118 +3986,10 @@ private:
         edit->Release();
         return SUCCEEDED(hr);
     }
-    static bool IsVowel(wchar_t c) { return c==L'a'||c==L'i'||c==L'u'||c==L'e'||c==L'o'; }
-    static bool IsConsonant(wchar_t c) { return (c>=L'a'&&c<=L'z') && !IsVowel(c); }
-    // Convert available part of m_romajiBuffer into Hiragana.
-    // If finalize=true, flush any remaining 'n' etc.
     std::wstring ConvertRomaji(bool finalize) {
-        std::wstring out;
-        auto emit = [&](const wchar_t* s) { out.append(s); };
-        auto consume = [&](size_t n) { m_romajiBuffer.erase(0, n); };
-        struct Map { const wchar_t* roma; const wchar_t* hira; };
-        static const Map map4[] = {
-            {L"ltsu",L"っ"},
-        };
-        static const Map map3[] = {
-            {L"kya",L"きゃ"},{L"kyu",L"きゅ"},{L"kyo",L"きょ"},
-            {L"kwa",L"くぁ"},{L"kwi",L"くぃ"},{L"kwu",L"くぅ"},{L"kwe",L"くぇ"},{L"kwo",L"くぉ"},
-            {L"gya",L"ぎゃ"},{L"gyu",L"ぎゅ"},{L"gyo",L"ぎょ"},
-            {L"gwa",L"ぐぁ"},{L"gwi",L"ぐぃ"},{L"gwu",L"ぐぅ"},{L"gwe",L"ぐぇ"},{L"gwo",L"ぐぉ"},
-            {L"sha",L"しゃ"},{L"shu",L"しゅ"},{L"sho",L"しょ"},
-            {L"she",L"しぇ"},
-            {L"sya",L"しゃ"},{L"syu",L"しゅ"},{L"syo",L"しょ"},
-            {L"jya",L"じゃ"},{L"jyu",L"じゅ"},{L"jyo",L"じょ"},
-            {L"cha",L"ちゃ"},{L"chu",L"ちゅ"},{L"cho",L"ちょ"},
-            {L"che",L"ちぇ"},
-            {L"tya",L"ちゃ"},{L"tyu",L"ちゅ"},{L"tyo",L"ちょ"},
-            {L"thi",L"てぃ"},
-            {L"cya",L"ちゃ"},{L"cyu",L"ちゅ"},{L"cyo",L"ちょ"},
-            {L"tsa",L"つぁ"},{L"tsi",L"つぃ"},{L"tse",L"つぇ"},{L"tso",L"つぉ"},
-            {L"xtu",L"っ"},{L"ltu",L"っ"},
-            {L"xya",L"ゃ"},{L"xyu",L"ゅ"},{L"xyo",L"ょ"},
-            {L"lya",L"ゃ"},{L"lyu",L"ゅ"},{L"lyo",L"ょ"},
-            {L"nya",L"にゃ"},{L"nyu",L"にゅ"},{L"nyo",L"にょ"},
-            {L"hya",L"ひゃ"},{L"hyu",L"ひゅ"},{L"hyo",L"ひょ"},
-            {L"fya",L"ふゃ"},{L"fyu",L"ふゅ"},{L"fyo",L"ふょ"},
-            {L"bya",L"びゃ"},{L"byu",L"びゅ"},{L"byo",L"びょ"},
-            {L"pya",L"ぴゃ"},{L"pyu",L"ぴゅ"},{L"pyo",L"ぴょ"},
-            {L"mya",L"みゃ"},{L"myu",L"みゅ"},{L"myo",L"みょ"},
-            {L"rya",L"りゃ"},{L"ryu",L"りゅ"},{L"ryo",L"りょ"},
-            {L"vya",L"ゔゃ"},{L"vyi",L"ゔぃ"},{L"vyu",L"ゔゅ"},{L"vye",L"ゔぇ"},{L"vyo",L"ゔょ"},
-            {L"shi",L"し"},{L"chi",L"ち"},{L"tsu",L"つ"},
-            {L"dya",L"ぢゃ"},{L"dyu",L"ぢゅ"},{L"dyo",L"ぢょ"},
-            {L"dhi",L"でぃ"},
-        };
-        static const Map map2[] = {
-            {L"ka",L"か"},{L"ki",L"き"},{L"ku",L"く"},{L"ke",L"け"},{L"ko",L"こ"},
-            {L"ga",L"が"},{L"gi",L"ぎ"},{L"gu",L"ぐ"},{L"ge",L"げ"},{L"go",L"ご"},
-            {L"sa",L"さ"},{L"si",L"し"},{L"su",L"す"},{L"se",L"せ"},{L"so",L"そ"},
-            {L"ja",L"じゃ"},{L"ji",L"じ"},{L"ju",L"じゅ"},{L"je",L"じぇ"},{L"jo",L"じょ"},
-            {L"za",L"ざ"},{L"zi",L"じ"},{L"zu",L"ず"},{L"ze",L"ぜ"},{L"zo",L"ぞ"},
-            {L"ta",L"た"},{L"ti",L"ち"},{L"tu",L"つ"},{L"te",L"て"},{L"to",L"と"},
-            {L"da",L"だ"},{L"di",L"ぢ"},{L"du",L"づ"},{L"de",L"で"},{L"do",L"ど"},
-            {L"na",L"な"},{L"ni",L"に"},{L"nu",L"ぬ"},{L"ne",L"ね"},{L"no",L"の"},
-            {L"ha",L"は"},{L"hi",L"ひ"},{L"hu",L"ふ"},{L"he",L"へ"},{L"ho",L"ほ"},
-            {L"ba",L"ば"},{L"bi",L"び"},{L"bu",L"ぶ"},{L"be",L"べ"},{L"bo",L"ぼ"},
-            {L"pa",L"ぱ"},{L"pi",L"ぴ"},{L"pu",L"ぷ"},{L"pe",L"ぺ"},{L"po",L"ぽ"},
-            {L"ma",L"ま"},{L"mi",L"み"},{L"mu",L"む"},{L"me",L"め"},{L"mo",L"も"},
-            {L"ya",L"や"},{L"yu",L"ゆ"},{L"yo",L"よ"},
-            {L"ye",L"いぇ"},
-            {L"ra",L"ら"},{L"ri",L"り"},{L"ru",L"る"},{L"re",L"れ"},{L"ro",L"ろ"},
-            {L"wa",L"わ"},{L"wo",L"を"},
-            {L"wi",L"うぃ"},{L"wu",L"う"},{L"we",L"うぇ"},
-            {L"qa",L"くぁ"},{L"qi",L"くぃ"},{L"qu",L"く"},{L"qe",L"くぇ"},{L"qo",L"くぉ"},
-            {L"va",L"ゔぁ"},{L"vi",L"ゔぃ"},{L"vu",L"ゔ"},{L"ve",L"ゔぇ"},{L"vo",L"ゔぉ"},
-            {L"la",L"ぁ"},{L"li",L"ぃ"},{L"lu",L"ぅ"},{L"le",L"ぇ"},{L"lo",L"ぉ"},
-            {L"xa",L"ぁ"},{L"xi",L"ぃ"},{L"xu",L"ぅ"},{L"xe",L"ぇ"},{L"xo",L"ぉ"},
-            {L"nn",L"ん"},
-            {L"fa",L"ふぁ"},{L"fi",L"ふぃ"},{L"fu",L"ふ"},{L"fe",L"ふぇ"},{L"fo",L"ふぉ"},
-        };
-        static const Map map1[] = {
-            {L"a",L"あ"},{L"i",L"い"},{L"u",L"う"},{L"e",L"え"},{L"o",L"お"},
-            {L"n",L"ん"},
-        };
-        while (!m_romajiBuffer.empty()) {
-            if (m_romajiBuffer.size() >= 2 && m_romajiBuffer[0] == m_romajiBuffer[1] && IsConsonant(m_romajiBuffer[0]) && m_romajiBuffer[0] != L'n') {
-                emit(L"っ"); consume(1); continue;
-            }
-            if (m_romajiBuffer[0] == L'n') {
-                if (m_romajiBuffer.size() >= 2) {
-                    wchar_t n2 = m_romajiBuffer[1];
-                    if (n2 == L'\'') { emit(L"ん"); consume(2); continue; }
-                    if (n2 == L'y' && m_romajiBuffer.size() < 3) { break; }
-                    if (n2 == L'n') {
-                        if (m_romajiBuffer.size() >= 3) {
-                            wchar_t n3 = m_romajiBuffer[2];
-                            if (IsVowel(n3) || n3 == L'y') { emit(L"ん"); consume(1); continue; }
-                        }
-                        emit(L"ん"); consume(2); continue;
-                    }
-                    if (!IsVowel(n2) && n2 != L'y') { emit(L"ん"); consume(1); continue; }
-                } else {
-                    if (finalize) { emit(L"ん"); consume(1); continue; }
-                    break;
-                }
-            }
-            bool matched = false;
-            if (m_romajiBuffer.size() >= 4) {
-                for (const auto& m : map4) { if (m_romajiBuffer.rfind(m.roma, 0) == 0) { emit(m.hira); consume(4); matched = true; break; } }
-                if (matched) continue;
-            }
-            if (m_romajiBuffer.size() >= 3) {
-                for (const auto& m : map3) { if (m_romajiBuffer.rfind(m.roma, 0) == 0) { emit(m.hira); consume(3); matched = true; break; } }
-                if (matched) continue;
-            }
-            if (m_romajiBuffer.size() >= 2) {
-                for (const auto& m : map2) { if (m_romajiBuffer.rfind(m.roma, 0) == 0) { emit(m.hira); consume(2); matched = true; break; } }
-                if (matched) continue;
-            }
-            for (const auto& m : map1) { if (m_romajiBuffer.rfind(m.roma, 0) == 0) { emit(m.hira); consume(1); matched = true; break; } }
-            if (matched) continue;
-            wchar_t c0 = m_romajiBuffer[0];
-            if (!(c0 >= L'a' && c0 <= L'z')) { wchar_t s[2] = { c0, 0 }; emit(s); consume(1); continue; }
-            break;
-        }
+        const bool tracked = m_inputHistoryReading == PreeditText();
+        auto out = ConvertRomajiBuffer(m_romajiBuffer, finalize);
+        if (tracked) m_inputHistoryReading = DraftText() + out + m_romajiBuffer;
         return out;
     }
     LONG m_ref;

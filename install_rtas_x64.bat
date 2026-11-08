@@ -16,7 +16,7 @@ if not exist "%SRC_CONFIG%" (
 )
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
-  "$dll='%DLL_PATH%'; $src='%SRC_CONFIG%'; $dst='%DST_CONFIG%'; $dir=Split-Path -Parent $dst; " ^
+  "$ErrorActionPreference='Stop'; $dll='%DLL_PATH%'; $src='%SRC_CONFIG%'; $dst='%DST_CONFIG%'; $dir=Split-Path -Parent $dst; " ^
   "if(!(Test-Path $dir)){ New-Item -ItemType Directory -Path $dir -Force | Out-Null }; " ^
   "Copy-Item -Force $src $dst; " ^
   "$p = Start-Process -FilePath \"$env:SystemRoot\\System32\\regsvr32.exe\" -ArgumentList '/s', $dll -Verb RunAs -PassThru -Wait; exit $p.ExitCode"

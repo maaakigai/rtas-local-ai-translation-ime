@@ -54,6 +54,8 @@ int main() try {
         auto defaultSettings = LoadProviderSettings(repoConfig, &error);
         expect(error.empty(), "default config parse");
         expect(defaultSettings.kana.mode == ProviderMode::kMozc, "default kana provider mode is Mozc");
+        expect(defaultSettings.translation.llm.model == "plamo-3-translate:2b",
+               "default translation uses PLaMo 3 Translate");
         expect(defaultSettings.translation.llm.keep_alive == "-1",
                "default translation llm keep_alive keeps model resident");
         expect(defaultSettings.translation.llm.warmup_on_activate,
