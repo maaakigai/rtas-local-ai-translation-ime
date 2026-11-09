@@ -474,6 +474,10 @@ ProviderSettings LoadProviderSettings(const std::filesystem::path& config_path,
     }
 
     const auto& provider = *provider_it;
+    if (const auto enabled = provider.find("warframe_dictionary_enabled");
+        enabled != provider.end() && enabled->is_boolean()) {
+      settings.warframe_dictionary_enabled = enabled->get<bool>();
+    }
 
     // Kana (conversion) branch
     if (auto kana_it = provider.find("kana");

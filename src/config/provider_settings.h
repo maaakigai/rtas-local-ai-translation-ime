@@ -142,6 +142,7 @@ struct ProviderSettings {
   TranslationProviderSettings translation;
   RuntimeLimits runtime_limits;
   LoggingSettings logging;
+  bool warframe_dictionary_enabled = false;
 };
 
 ProviderSettings LoadProviderSettings(

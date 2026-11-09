@@ -44,6 +44,14 @@ bool RunCandidateStateTests() {
     expect(ConvertCharacterForm(L"HELLO WORLD", VK_F10, 2) == L"Hello World", "repeated F10 can capitalize words");
     expect(ConvertCharacterForm(L"", VK_F7).empty(), "empty form conversion is safe");
     std::wstring roman;
+    roman = L"n";
+    expect(ConvertRomajiBuffer(roman, false).empty() && PreviewRomajiBuffer(roman) == L"n",
+           "one n waits for the next key");
+    roman += L'n';
+    expect(ConvertRomajiBuffer(roman, false).empty() && PreviewRomajiBuffer(roman) == L"ん",
+           "two n keys immediately display hiragana");
+    expect(ConvertRomajiBuffer(roman, true) == L"ん" && roman.empty(),
+           "finalizing nn commits one hiragana character");
     std::wstring converted;
     for (wchar_t ch : std::wstring(L"konnichiha")) {
         roman += ch;
@@ -51,6 +59,14 @@ bool RunCandidateStateTests() {
     }
     converted += ConvertRomajiBuffer(roman, true);
     expect(converted == L"こんにちは" && roman.empty(), "shared converter preserves incremental romaji input");
+    roman = L"pt";
+    expect(ConvertRomajiBuffer(roman, false).empty() && roman == L"pt",
+           "incomplete Latin input stays visible in preedit");
+    expect(ConvertRomajiBuffer(roman, true) == L"pt" && roman.empty(),
+           "finalizing a unit suffix retains both letters");
+    roman = L"n";
+    expect(ConvertRomajiBuffer(roman, true) == L"ん" && roman.empty(),
+           "finalizing n still produces hiragana");
     roman = L"gakkou";
     expect(ConvertRomajiBuffer(roman, true) == L"がっこう", "shared converter preserves doubled consonants");
     roman = RomajiFromKana(L"しゃしん がっこう");

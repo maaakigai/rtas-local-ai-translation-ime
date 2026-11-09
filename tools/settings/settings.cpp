@@ -3,6 +3,7 @@
 #include <shellapi.h>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <memory>
 #include <mutex>
@@ -12,6 +13,7 @@
 #include "../../src/config/settings_editor.h"
 #include "../../src/llm/model_catalog.h"
 #include "../../src/llm/local_server.h"
+#include "../../third_party/nlohmann/json.hpp"
 
 namespace {
 
@@ -36,6 +38,7 @@ struct DialogState {
     bool dirty = false;
     std::shared_ptr<CatalogRequest> catalog;
     std::shared_ptr<DeviceRequest> deviceRequest;
+    HANDLE dictionaryUpdater = nullptr;
     bool closeAfterDevice = false;
 };
 
@@ -64,6 +67,91 @@ std::wstring Text(HWND dialog, int control) {
 
 void Status(HWND dialog, const wchar_t* text) {
     SetDlgItemTextW(dialog, IDC_STATUS, text);
+}
+
+std::filesystem::path WarframeDictionaryPath(const DialogState& state) {
+    return state.document.path.parent_path() / L"warframe_dictionary.tsv";
+}
+
+void ShowWarframeDictionaryStatus(HWND dialog, const DialogState& state) {
+    std::ifstream stream(WarframeDictionaryPath(state), std::ios::binary);
+    std::string header, info;
+    if (std::getline(stream, header) && header == "# RTAS Warframe dictionary v1" &&
+        std::getline(stream, info) && info.starts_with("# ")) {
+        const auto metadata = nlohmann::json::parse(info.substr(2), nullptr, false);
+        if (metadata.is_object() && metadata.contains("entries") && metadata["entries"].is_number_unsigned()) {
+            auto count = [&](const char* field) -> size_t {
+                const auto value = metadata.find(field);
+                return value != metadata.end() && value->is_number_unsigned() ? value->get<size_t>() : 0;
+            };
+            const auto text = std::to_wstring(count("entries")) +
+                L" 件（追加 " + std::to_wstring(count("added")) +
+                L"、変更 " + std::to_wstring(count("changed")) +
+                L"、日英未照合 " + std::to_wstring(count("missing_ja") + count("missing_en")) + L"）";
+            SetDlgItemTextW(dialog, IDC_WARFRAME_STATUS, text.c_str());
+            return;
+        }
+    }
+    SetDlgItemTextW(dialog, IDC_WARFRAME_STATUS, L"公式データは未取得です。");
+}
+
+void StartWarframeUpdate(HWND dialog, DialogState& state) {
+    if (!state.loaded || state.dictionaryUpdater || state.deviceRequest) return;
+    wchar_t module[32768]{};
+    const DWORD moduleLength = GetModuleFileNameW(nullptr, module, ARRAYSIZE(module));
+    if (!moduleLength || moduleLength >= ARRAYSIZE(module)) return;
+    const auto script = std::filesystem::path(module).parent_path() / L"update_warframe_dictionary.py";
+    std::error_code error;
+    if (!std::filesystem::is_regular_file(script, error)) {
+        SetDlgItemTextW(dialog, IDC_WARFRAME_STATUS, L"辞書の更新スクリプトが見つかりません。");
+        return;
+    }
+
+    wchar_t path[32768]{};
+    const DWORD pathLength = GetEnvironmentVariableW(L"PATH", path, ARRAYSIZE(path));
+    if (!pathLength || pathLength >= ARRAYSIZE(path)) return;
+    wchar_t python[32768]{};
+    DWORD length = SearchPathW(path, L"py.exe", nullptr, ARRAYSIZE(python), python, nullptr);
+    const bool launcher = length && length < ARRAYSIZE(python);
+    if (!launcher) length = SearchPathW(path, L"python.exe", nullptr, ARRAYSIZE(python), python, nullptr);
+    if (!length || length >= ARRAYSIZE(python) || std::wstring_view(python).find(L"\\WindowsApps\\") != std::wstring_view::npos) {
+        SetDlgItemTextW(dialog, IDC_WARFRAME_STATUS, L"更新には PATH 上の Python 3 が必要です。");
+        return;
+    }
+
+    std::wstring command = L"\"" + std::wstring(python) + (launcher ? L"\" -3" : L"\"") +
+        L" -I \"" + script.wstring() + L"\" \"" + WarframeDictionaryPath(state).wstring() + L"\"";
+    STARTUPINFOW startup{};
+    startup.cb = sizeof(startup);
+    PROCESS_INFORMATION process{};
+    if (!CreateProcessW(python, command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW,
+                        nullptr, nullptr, &startup, &process)) {
+        SetDlgItemTextW(dialog, IDC_WARFRAME_STATUS, L"Python を起動できませんでした。");
+        return;
+    }
+    CloseHandle(process.hThread);
+    state.dictionaryUpdater = process.hProcess;
+    for (int id : {IDC_WARFRAME_UPDATE, IDC_RELOAD, IDC_BROWSE}) EnableWindow(GetDlgItem(dialog, id), FALSE);
+    SetDlgItemTextW(dialog, IDC_WARFRAME_STATUS, L"Warframe の公式データを取得しています…");
+    SetTimer(dialog, IDC_WARFRAME_UPDATE, 200, nullptr);
+}
+
+void FinishWarframeUpdate(HWND dialog, DialogState& state) {
+    if (!state.dictionaryUpdater || WaitForSingleObject(state.dictionaryUpdater, 0) == WAIT_TIMEOUT) return;
+    DWORD code = 1;
+    GetExitCodeProcess(state.dictionaryUpdater, &code);
+    CloseHandle(state.dictionaryUpdater);
+    state.dictionaryUpdater = nullptr;
+    KillTimer(dialog, IDC_WARFRAME_UPDATE);
+    for (int id : {IDC_WARFRAME_UPDATE, IDC_RELOAD, IDC_BROWSE}) {
+        EnableWindow(GetDlgItem(dialog, id), !state.deviceRequest);
+    }
+    if (code == 0) {
+        ShowWarframeDictionaryStatus(dialog, state);
+        Status(dialog, L"辞書を更新しました。IMEを使用するアプリを再起動してください。");
+    } else {
+        SetDlgItemTextW(dialog, IDC_WARFRAME_STATUS, L"更新に失敗しました。前回取得した辞書を使用します。");
+    }
 }
 
 ime::config::LlmSettings ReadLlm(HWND dialog, const DialogState& state) {
@@ -100,8 +188,11 @@ void UpdateDeviceControl(HWND dialog, const DialogState& state) {
 
 void EnableForm(HWND dialog, const DialogState& state, bool enabled) {
     for (int id : {IDOK, IDC_RELOAD, IDC_BROWSE, IDC_FETCH_MODELS, IDC_BACKEND, IDC_MODEL,
-        IDC_HOST, IDC_PORT, IDC_PATH, IDC_TIMEOUT, IDC_TLS, IDC_KANA_ONLY, IDC_PROMPT_FORMAT, IDC_DEVICE}) {
-        EnableWindow(GetDlgItem(dialog, id), enabled);
+        IDC_HOST, IDC_PORT, IDC_PATH, IDC_TIMEOUT, IDC_TLS, IDC_KANA_ONLY, IDC_PROMPT_FORMAT, IDC_DEVICE,
+        IDC_WARFRAME_ENABLED, IDC_WARFRAME_UPDATE}) {
+        const bool lockedByUpdate = state.dictionaryUpdater &&
+            (id == IDC_RELOAD || id == IDC_BROWSE || id == IDC_WARFRAME_UPDATE);
+        EnableWindow(GetDlgItem(dialog, id), enabled && !lockedByUpdate);
     }
     if (enabled) UpdateDeviceControl(dialog, state);
 }
@@ -216,6 +307,11 @@ void Populate(HWND dialog, DialogState& state) {
     CheckDlgButton(dialog, IDC_TLS, llm.use_tls ? BST_CHECKED : BST_UNCHECKED);
     const auto& mozc = state.document.settings.kana.mozc;
     CheckDlgButton(dialog, IDC_KANA_ONLY, mozc && mozc->kana_kanji_only_mode ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(dialog, IDC_WARFRAME_ENABLED,
+        state.document.settings.warframe_dictionary_enabled ? BST_CHECKED : BST_UNCHECKED);
+    EnableWindow(GetDlgItem(dialog, IDC_WARFRAME_ENABLED), TRUE);
+    EnableWindow(GetDlgItem(dialog, IDC_WARFRAME_UPDATE), TRUE);
+    ShowWarframeDictionaryStatus(dialog, state);
     SetDlgItemTextW(dialog, IDC_CONFIG_PATH, state.document.path.c_str());
     EnableWindow(GetDlgItem(dialog, IDOK), TRUE);
     EnableWindow(GetDlgItem(dialog, IDC_RELOAD), TRUE);
@@ -228,7 +324,7 @@ void Populate(HWND dialog, DialogState& state) {
 }
 
 bool Load(HWND dialog, DialogState& state, const std::filesystem::path& path) {
-    if (state.deviceRequest) return false;
+    if (state.deviceRequest || state.dictionaryUpdater) return false;
     std::wstring error;
     if (!ime::config::LoadSettingsDocument(path, state.document, error)) {
         MessageBoxW(dialog, error.c_str(), L"設定を開けません", MB_OK | MB_ICONERROR);
@@ -241,7 +337,13 @@ bool Load(HWND dialog, DialogState& state, const std::filesystem::path& path) {
 bool Save(HWND dialog, DialogState& state) {
     if (!state.loaded || state.deviceRequest) return false;
     const auto llm = ReadLlm(dialog, state);
-    const bool applyDevice = IsManagedLocal(llm);
+    const bool warframeEnabled = IsDlgButtonChecked(dialog, IDC_WARFRAME_ENABLED) == BST_CHECKED;
+    const auto& previous = state.document.settings.translation.llm;
+    const bool dictionaryChanged = warframeEnabled != state.document.settings.warframe_dictionary_enabled;
+    const bool serverUnchanged = llm.backend == previous.backend && llm.device == previous.device &&
+        llm.host == previous.host && llm.port == previous.port && llm.model == previous.model &&
+        llm.use_tls == previous.use_tls;
+    const bool applyDevice = IsManagedLocal(llm) && (!dictionaryChanged || !serverUnchanged);
     std::error_code launcherError;
     if (applyDevice && !std::filesystem::is_regular_file(
         (state.document.path.parent_path() / Wide(llm.local_runtime_root)) / L"build/llama_cpp/b12110/llama-server.exe", launcherError)) {
@@ -250,7 +352,8 @@ bool Save(HWND dialog, DialogState& state) {
     }
     std::wstring error;
     if (!ime::config::SaveSettingsDocument(state.document, llm,
-        IsDlgButtonChecked(dialog, IDC_KANA_ONLY) == BST_CHECKED, error)) {
+        IsDlgButtonChecked(dialog, IDC_KANA_ONLY) == BST_CHECKED,
+        warframeEnabled, error)) {
         MessageBoxW(dialog, error.c_str(), L"保存できません", MB_OK | MB_ICONWARNING);
         return false;
     }
@@ -272,6 +375,10 @@ bool ConfirmChanges(HWND dialog, DialogState& state) {
 }
 
 void CloseDialog(HWND dialog, DialogState& state) {
+    if (state.dictionaryUpdater) {
+        Status(dialog, L"辞書の更新が終わってから設定画面を閉じてください。");
+        return;
+    }
     if (!state.deviceRequest && !ConfirmChanges(dialog, state)) return;
     if (state.deviceRequest) {
         state.closeAfterDevice = true;
@@ -295,6 +402,8 @@ INT_PTR CALLBACK DialogProcedure(HWND dialog, UINT message, WPARAM wParam, LPARA
         }
         EnableWindow(GetDlgItem(dialog, IDOK), FALSE);
         EnableWindow(GetDlgItem(dialog, IDC_RELOAD), FALSE);
+        EnableWindow(GetDlgItem(dialog, IDC_WARFRAME_ENABLED), FALSE);
+        EnableWindow(GetDlgItem(dialog, IDC_WARFRAME_UPDATE), FALSE);
         SetDlgItemTextW(dialog, IDC_CONFIG_PATH, state->initialPath.c_str());
         Load(dialog, *state, state->initialPath);
         return TRUE;
@@ -302,7 +411,12 @@ INT_PTR CALLBACK DialogProcedure(HWND dialog, UINT message, WPARAM wParam, LPARA
     if (!state) return FALSE;
     if (message == WM_TIMER && wParam == IDC_FETCH_MODELS) { ApplyModels(dialog, *state); return TRUE; }
     if (message == WM_TIMER && wParam == IDC_DEVICE) { FinishDevice(dialog, *state); return TRUE; }
-    if (message == WM_DESTROY) { CancelCatalog(dialog, *state); return TRUE; }
+    if (message == WM_TIMER && wParam == IDC_WARFRAME_UPDATE) { FinishWarframeUpdate(dialog, *state); return TRUE; }
+    if (message == WM_DESTROY) {
+        CancelCatalog(dialog, *state);
+        if (state->dictionaryUpdater) CloseHandle(state->dictionaryUpdater);
+        return TRUE;
+    }
     if (message == WM_CLOSE) {
         CloseDialog(dialog, *state);
         return TRUE;
@@ -312,6 +426,7 @@ INT_PTR CALLBACK DialogProcedure(HWND dialog, UINT message, WPARAM wParam, LPARA
     const int notification = HIWORD(wParam);
     if (id == IDOK) { Save(dialog, *state); return TRUE; }
     if (id == IDC_FETCH_MODELS) { if (state->loaded) FetchModels(dialog, *state); return TRUE; }
+    if (id == IDC_WARFRAME_UPDATE) { StartWarframeUpdate(dialog, *state); return TRUE; }
     if (id == IDCANCEL) {
         CloseDialog(dialog, *state);
         return TRUE;
@@ -370,7 +485,7 @@ INT_PTR CALLBACK DialogProcedure(HWND dialog, UINT message, WPARAM wParam, LPARA
         state->dirty = true;
         Status(dialog, L"モデルを変更しました。保存すると反映されます。");
     } else if ((notification == EN_CHANGE && id >= IDC_MODEL && id <= IDC_TIMEOUT) ||
-               ((id == IDC_TLS || id == IDC_KANA_ONLY) && notification == BN_CLICKED)) {
+               ((id == IDC_TLS || id == IDC_KANA_ONLY || id == IDC_WARFRAME_ENABLED) && notification == BN_CLICKED)) {
         state->dirty = true;
         if (id == IDC_HOST || id == IDC_PORT || id == IDC_TLS) CancelCatalog(dialog, *state);
         Status(dialog, L"変更があります。保存すると設定ファイルに反映されます。");

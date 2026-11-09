@@ -21,6 +21,156 @@ extern const GUID GUID_Preserved_DBE_SBCSCHAR;
 extern const GUID GUID_Preserved_DBE_DBCSCHAR;
 extern const GUID GUID_Preserved_DBE_ROMAN;
 
+namespace {
+
+struct WarframeTerm {
+    std::wstring_view reading;
+    std::wstring_view english;
+};
+
+constexpr WarframeTerm kWarframeTerms[] = {
+    // https://www.warframe.com/{en,ja}/news/the-old-blood-8
+    {L"くばりっち", L"Kuva Lich"},
+    {L"くば・りっち", L"Kuva Lich"},
+    {L"くば りっち", L"Kuva Lich"},
+    {L"くば　りっち", L"Kuva Lich"},
+    // https://www.warframe.com/en/patch-notes/pc/30-5-0
+    {L"がるばないずどもっど", L"Galvanized Mod"},
+    {L"がるばないずどmod", L"Galvanized Mod"},
+    // https://www.warframe.com/{en,ja}/news/the-old-blood-8
+    {L"れくいえむもっど", L"Requiem Mod"},
+    {L"れくいえむmod", L"Requiem Mod"},
+    // https://www.warframe.com/ja/news/lich-sistemi-nedir
+    {L"くばへっく", L"Kuva Hek"},
+    {L"くばぬこあ", L"Kuva Nukor"},
+    {L"くばぬこー", L"Kuva Nukor"},
+    {L"くばぶらんま", L"Kuva Bramma"},
+};
+
+std::wstring FoldWarframeTerm(std::wstring_view text) {
+    std::wstring folded(text);
+    for (wchar_t& ch : folded) {
+        if (ch >= L'ァ' && ch <= L'ヶ') ch -= L'ァ' - L'ぁ';
+        if (ch >= L'A' && ch <= L'Z') ch += L'a' - L'A';
+    }
+    return folded;
+}
+
+bool IsLatinWordChar(wchar_t ch) {
+    return (ch >= L'a' && ch <= L'z') || (ch >= L'0' && ch <= L'9') || ch == L'_';
+}
+
+bool HasWordBoundary(std::wstring_view text, size_t start, size_t length) {
+    const size_t end = start + length;
+    return !(start && IsLatinWordChar(text[start]) && IsLatinWordChar(text[start - 1])) &&
+        !(end < text.size() && IsLatinWordChar(text[end - 1]) && IsLatinWordChar(text[end]));
+}
+
+}  // namespace
+
+void WarframeDictionary::Add(std::wstring_view alias, std::wstring_view english, bool translate) {
+    if (alias.empty()) return;
+    auto folded = FoldWarframeTerm(alias);
+    const bool canonicalEnglish = alias == english;
+    if (translate || canonicalEnglish) {
+        auto& lengths = lengths_[folded.front()];
+        const auto pos = std::lower_bound(lengths.begin(), lengths.end(), folded.size(), std::greater<>{});
+        if (pos == lengths.end() || *pos != folded.size()) lengths.insert(pos, folded.size());
+    }
+    auto& entry = aliases_[std::move(folded)];
+    if (std::find(entry.names.begin(), entry.names.end(), english) == entry.names.end()) {
+        entry.names.emplace_back(english);
+    }
+    entry.translate |= translate;
+    entry.english |= canonicalEnglish;
+}
+
+void WarframeDictionary::Load(const std::filesystem::path& path) {
+    aliases_.clear();
+    lengths_.clear();
+    for (const auto& term : kWarframeTerms) {
+        Add(term.reading, term.english, true);
+        Add(term.english, term.english, true);
+    }
+
+    if (path.empty()) return;
+    std::ifstream stream(path, std::ios::binary);
+    std::string line;
+    if (!std::getline(stream, line) || line != "# RTAS Warframe dictionary v1") return;
+    while (std::getline(stream, line)) {
+        if (line.empty() || line.front() == '#') continue;
+        const size_t first = line.find('\t');
+        const size_t second = first == std::string::npos ? first : line.find('\t', first + 1);
+        const size_t third = second == std::string::npos ? second : line.find('\t', second + 1);
+        if (third == std::string::npos) continue;
+        const auto english = Utf8ToWide(line.substr(0, first));
+        if (english.empty()) continue;
+        const auto japanese = Utf8ToWide(line.substr(first + 1, second - first - 1));
+        const auto reading = Utf8ToWide(line.substr(second + 1, third - second - 1));
+        Add(english, english, false);
+        // Short official labels often overlap ordinary Japanese words.
+        const bool translate = japanese.size() >= 4 && japanese != english &&
+            std::any_of(japanese.begin(), japanese.end(), [](wchar_t ch) { return ch > 0x7F; });
+        Add(japanese, english, translate);
+        Add(reading, english, std::string_view(line).substr(third + 1).starts_with("supplement:"));
+    }
+}
+
+std::span<const std::wstring> WarframeDictionary::Find(std::wstring_view reading) const {
+    if (aliases_.empty()) return {};
+    const auto entry = aliases_.find(FoldWarframeTerm(reading));
+    if (entry == aliases_.end()) return {};
+    return entry->second.names;
+}
+
+std::wstring WarframeDictionary::Normalize(std::wstring_view text) const {
+    return Rewrite(text, {});
+}
+
+std::wstring WarframeDictionary::RestoreEnglishSpelling(
+    std::wstring_view source, std::wstring_view translation) const {
+    if (source.empty() || lengths_.empty()) return std::wstring(translation);
+    return Rewrite(translation, FoldWarframeTerm(source));
+}
+
+std::wstring WarframeDictionary::Rewrite(std::wstring_view text, std::wstring_view foldedSource) const {
+    if (lengths_.empty()) return std::wstring(text);
+    std::wstring normalized;
+    const auto folded = FoldWarframeTerm(text);
+    for (size_t pos = 0; pos < folded.size();) {
+        size_t consumed = 0;
+        const auto prefix = lengths_.find(folded[pos]);
+        if (prefix != lengths_.end()) {
+            for (const size_t length : prefix->second) {
+                if (length > folded.size() - pos || !HasWordBoundary(folded, pos, length)) continue;
+                const auto alias = std::wstring_view(folded).substr(pos, length);
+                const auto entry = aliases_.find(alias);
+                if (entry == aliases_.end()) continue;
+                if (foldedSource.empty()) {
+                    if (!entry->second.translate) continue;
+                } else {
+                    if (!entry->second.english) continue;
+                    size_t match = foldedSource.find(alias);
+                    while (match != std::wstring_view::npos && !HasWordBoundary(foldedSource, match, length)) {
+                        match = foldedSource.find(alias, match + 1);
+                    }
+                    if (match == std::wstring_view::npos) continue;
+                }
+                if (entry->second.names.size() == 1) normalized += entry->second.names.front();
+                else normalized.append(text.substr(pos, length));
+                consumed = length;
+                break;
+            }
+        }
+        if (!consumed) {
+            normalized.push_back(text[pos]);
+            consumed = 1;
+        }
+        pos += consumed;
+    }
+    return normalized;
+}
+
 UINT GetImeKeyModifiers() {
     return ((GetKeyState(VK_SHIFT) & 0x8000) ? MOD_SHIFT : 0) |
         ((GetKeyState(VK_CONTROL) & 0x8000) ? MOD_CONTROL : 0) |
@@ -576,6 +726,11 @@ static bool IsConsonant(wchar_t c) { return (c>=L'a'&&c<=L'z') && !IsVowel(c); }
 
 } // namespace
 
+std::wstring_view PreviewRomajiBuffer(std::wstring_view buffer) {
+    // Keep both keystrokes available so the second n can start a syllable such as ni.
+    return buffer == L"nn" ? std::wstring_view(L"ん") : buffer;
+}
+
 std::wstring ConvertRomajiBuffer(std::wstring& buffer, bool finalize) {
     std::wstring out;
     auto emit = [&](const wchar_t* s) { out.append(s); };
@@ -621,6 +776,10 @@ std::wstring ConvertRomajiBuffer(std::wstring& buffer, bool finalize) {
         wchar_t c0 = buffer[0];
         if (!(c0 >= L'a' && c0 <= L'z')) { wchar_t s[2] = { c0, 0 }; emit(s); consume(1); continue; }
         break;
+    }
+    if (finalize) {
+        out += buffer;
+        buffer.clear();
     }
     return out;
 }

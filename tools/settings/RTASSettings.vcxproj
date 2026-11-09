@@ -46,5 +46,8 @@
     <ClInclude Include="resource.h" />
     <ResourceCompile Include="settings.rc" />
   </ItemGroup>
+  <Target Name="CopyWarframeUpdater" AfterTargets="Build">
+    <Copy SourceFiles="update_warframe_dictionary.py" DestinationFolder="$(OutDir)" SkipUnchangedFiles="true" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

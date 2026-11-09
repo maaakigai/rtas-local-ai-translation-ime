@@ -73,7 +73,8 @@ bool LoadSettingsDocument(const std::filesystem::path& path,
 }
 
 bool SaveSettingsDocument(SettingsDocument& document, const LlmSettings& llm,
-                          bool kana_kanji_only_mode, std::wstring& error) {
+                          bool kana_kanji_only_mode, bool warframe_dictionary_enabled,
+                          std::wstring& error) {
   error.clear();
   if (!Validate(llm, error)) return false;
 
@@ -101,6 +102,7 @@ bool SaveSettingsDocument(SettingsDocument& document, const LlmSettings& llm,
   try {
     auto root = nlohmann::json::parse(current, nullptr, true, true);
     auto& provider = root["provider"];
+    provider["warframe_dictionary_enabled"] = warframe_dictionary_enabled;
     if (!provider.contains("kana") || !provider["kana"].is_object()) {
       auto kana = nlohmann::json::object();
       for (const auto* key : {"mode", "llm", "dictionary", "mozc"}) {
@@ -160,6 +162,7 @@ bool SaveSettingsDocument(SettingsDocument& document, const LlmSettings& llm,
     }
     document.original_contents = output;
     document.settings.translation.llm = llm;
+    document.settings.warframe_dictionary_enabled = warframe_dictionary_enabled;
     if (document.settings.kana.mozc) {
       document.settings.kana.mozc->kana_kanji_only_mode = kana_kanji_only_mode;
     }

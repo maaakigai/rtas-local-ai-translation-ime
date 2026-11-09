@@ -2,11 +2,13 @@
 #include <chrono>
 #include <windows.h>
 #include <filesystem>
+#include <fstream>
 #include <string>
 
 #include "../../src/api/conversion_provider.h"
 #include "../../src/provider/dictionary_conversion_provider.h"
 #include "../../Ime3/rtas_translation.h"
+#include "../../Ime3/rtas_utils.h"
 #include "../../third_party/nlohmann/json.hpp"
 
 bool RunConversionProviderSmokeTest() try {
@@ -29,6 +31,43 @@ bool RunConversionProviderSmokeTest() try {
     };
 
     const std::wstring plamoModel = L"plamo-3-translate:2b";
+    {
+        WarframeDictionary glossary;
+        expect(glossary.Find(L"くばりっち").empty() && glossary.Normalize(L"くばりっち") == L"くばりっち",
+               "disabled glossary leaves lookup and translation untouched");
+        const auto path = fs::temp_directory_path() / (L"rtas-warframe-test-" + std::to_wstring(GetCurrentProcessId()));
+        std::ofstream(path, std::ios::binary)
+            << "# RTAS Warframe dictionary v1\n"
+               "The War Within\t内なる紛争\t\tquest\n"
+               "Galvanized Chamber\tGalvanized Chamber\tガルバナイズドチャンバー\tmod\n"
+               "Frost\tフロスト\t\tframe\nFrost Prime\tフロスト\t\tprime\n"
+               "Kuva Larvling\tクバ ラルブリング\tくばらるぶりんぐ\tsupplement:Kuva Larvling\n";
+        glossary.Load(path);
+        fs::remove(path);
+        const auto lich = glossary.Find(L"くばりっち");
+        expect(lich.size() == 1 && lich.front() == L"Kuva Lich", "Warframe reading yields an English candidate");
+        const auto chamber = glossary.Find(L"がるばないずどちゃんばー");
+        expect(chamber.size() == 1 && chamber.front() == L"Galvanized Chamber", "downloaded reading yields a mod");
+        expect(glossary.Find(L"くばりっちを倒した").empty(), "a sentence is not an exact dictionary reading");
+        expect(glossary.Normalize(L"クバ・リッチを倒してkuva hekを入手した") ==
+                   L"Kuva Lichを倒してKuva Hekを入手した",
+               "Japanese and English spellings normalize within the same sentence");
+        expect(glossary.Normalize(L"SKUVA LICHとkuva liches") == L"SKUVA LICHとkuva liches",
+               "normalization respects English word boundaries");
+        expect(glossary.Find(L"ふろすと").size() == 2 &&
+               glossary.Normalize(L"フロストとがるばないずどちゃんばー") == L"フロストとがるばないずどちゃんばー",
+               "ambiguous and estimated readings are not forced into translations");
+        expect(glossary.Normalize(L"内なる紛争とくばらるぶりんぐ") == L"The War WithinとKuva Larvling",
+               "official and verified supplemental aliases normalize together");
+        expect(glossary.RestoreEnglishSpelling(L"Galvanized Chamberが欲しい", L"I want a galvanized chamber.") ==
+                   L"I want a Galvanized Chamber." &&
+               glossary.RestoreEnglishSpelling(L"SKUVA LICH", L"kuva lich") == L"kuva lich",
+               "model output uses official spelling only for terms present in the source");
+        const auto body = nlohmann::json::parse(BuildTranslationRequestBody(
+            plamoModel, glossary.Normalize(L"くばりっちを倒した。"), L"", L"-1"));
+        expect(body["prompt"].get<std::string>().find("Kuva Lichを倒した。") != std::string::npos,
+               "PLaMo receives the canonical English game term inside the sentence");
+    }
     {
         const auto body = nlohmann::json::parse(BuildTranslationRequestBody(
             plamoModel, L"  会議は来週です。  ", L"  日程の連絡  ", L"-1"));

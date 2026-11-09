@@ -15,6 +15,7 @@ std::filesystem::path RegisteredSettingsPath();
 bool LoadSettingsDocument(const std::filesystem::path& path,
                           SettingsDocument& document, std::wstring& error);
 bool SaveSettingsDocument(SettingsDocument& document, const LlmSettings& llm,
-                          bool kana_kanji_only_mode, std::wstring& error);
+                          bool kana_kanji_only_mode, bool warframe_dictionary_enabled,
+                          std::wstring& error);
 
 }  // namespace ime::config

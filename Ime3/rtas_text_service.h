@@ -340,7 +340,10 @@ public:
         return S_OK;
     }
     // ITfKeyEventSink (hiragana mode with 0xF4 toggle)
-    STDMETHODIMP OnSetFocus(BOOL) override { return S_OK; }
+    STDMETHODIMP OnSetFocus(BOOL foreground) override {
+        if (!foreground && !m_composition) ResetForceHalfWidthInput();
+        return S_OK;
+    }
     STDMETHODIMP OnTestKeyDown(ITfContext* context, WPARAM wParam, LPARAM, BOOL* eaten) override {
         if (!eaten) return S_OK;
         const UINT modifiers = GetImeKeyModifiers();
@@ -367,7 +370,11 @@ public:
         if (hasActiveInput && ((key >= VK_F6 && key <= VK_F10) || key == VK_NONCONVERT || key == VK_CONVERT ||
             key == VK_DELETE || key == VK_HOME || key == VK_END)) { *eaten = TRUE; return S_OK; }
         if (hasUi && (key == VK_PRIOR || key == VK_NEXT || (key >= VK_NUMPAD1 && key <= VK_NUMPAD9))) { *eaten = TRUE; return S_OK; }
-        if (m_forceHalfWidthInput && hasActiveInput) {
+        if (m_forceHalfWidthInput) {
+            if (wParam == VK_RETURN || wParam == VK_ESCAPE) {
+                *eaten = TRUE;
+                return S_OK;
+            }
             const bool isLetter = (wParam >= 'A' && wParam <= 'Z');
             const bool isHalfWidthSymbol = (MapHalfWidthSymbol(static_cast<UINT>(wParam), shiftPressed) != nullptr);
             if (isLetter || isHalfWidthSymbol || wParam == VK_SPACE) {
@@ -552,7 +559,9 @@ public:
                 }
                 DraftText().clear();
                 m_romajiBuffer.clear();
-                ResetForceHalfWidthInput();
+                // The host received the text directly, so there is no editable
+                // composition to count, but the rest of the phrase is still ASCII.
+                m_forceHalfWidthOutstanding = 0;
             }
             UpdateOverlayFromState();
             if (eaten) *eaten = TRUE;
@@ -564,7 +573,7 @@ public:
             if (eaten) *eaten = TRUE;
             return S_OK;
         }
-        if (m_forceHalfWidthInput && hasActiveInput && !ctrlPressed) {
+        if (m_forceHalfWidthInput && !ctrlPressed) {
             std::wstring direct;
             if (wParam == VK_SPACE) {
                 direct.assign(1, L' ');
@@ -581,6 +590,7 @@ public:
             }
         }
         if (wParam == VK_ESCAPE) {
+            if (!hasActiveInput) ResetForceHalfWidthInput();
             if (m_candidateUI) {
                 if (m_layerState.tab == CandidateTab::Translation) {
                     CancelActiveTranslationRequest();
@@ -784,6 +794,7 @@ public:
             return S_OK;
         }
         if (wParam == VK_RETURN) {
+            if (!hasActiveInput) ResetForceHalfWidthInput();
             if (hasActiveInput) {
                 if (m_candidateUI) {
                     HandleTabEnter(context, shiftPressed);
@@ -792,7 +803,6 @@ public:
                     EnsureComposition(context);
                     if (m_composition) UpdateCompositionText(context, DraftText());
                     if (!SupportsLayer2Flow()) {
-                        // Enter must not open conversion candidates for an unselected draft.
                         CommitComposition(context, DraftText());
                         if (eaten) *eaten = TRUE;
                         return S_OK;
@@ -838,11 +848,7 @@ public:
             wchar_t ch = (wchar_t)wParam;
             if (iswalpha(ch)) ch = (wchar_t)towlower(ch);
             if (m_romajiBuffer.size() >= m_maxRomajiBuffer) {
-                std::wstring flushed = ConvertRomaji(true);
-                if (!flushed.empty()) {
-                    InsertDraftText(flushed);
-                }
-                m_romajiBuffer.clear();
+                FlushPendingRomaji();
             }
             m_romajiBuffer.push_back(ch);
             std::wstring newly = ConvertRomaji(false);
@@ -950,6 +956,7 @@ private:
     bool m_kanaMode = false;
     size_t m_maxPreeditChars = 512;
     size_t m_maxRomajiBuffer = 64;
+    WarframeDictionary m_warframeDictionary;
     bool m_forceHalfWidthInput = false;
     size_t m_forceHalfWidthOutstanding = 0;
     bool m_kanaKanjiOnlyMode = false;
@@ -1025,7 +1032,9 @@ private:
     // Build current preedit: converted kana + remaining romaji buffer
     std::wstring PreeditText() const {
         const size_t offset = EffectiveCompositionCaretOffset(DraftText().size());
-        return DraftText().substr(0, offset) + m_romajiBuffer + DraftText().substr(offset);
+        std::wstring preedit = DraftText();
+        preedit.insert(offset, PreviewRomajiBuffer(m_romajiBuffer));
+        return preedit;
     }
     std::wstring& DraftText() { return m_reading; }
     const std::wstring& DraftText() const { return m_reading; }
@@ -1037,17 +1046,16 @@ private:
     }
     std::wstring FlushPendingRomaji() {
         std::wstring text = ConvertRomaji(true);
-        text += m_romajiBuffer;
-        m_romajiBuffer.clear();
         InsertDraftText(text);
         return text;
     }
     void RecordInputKeys(const std::wstring& keys) {
         // shortcut: edits regenerate romaji from kana; retain per-character origins if exact spelling after edits is needed.
         if (m_compositionCaretOffset != std::wstring::npos && m_compositionCaretOffset < DraftText().size()) {
-            m_inputHistory = RomajiFromKana(PreeditText());
-            const size_t offset = RomajiFromKana(PreeditText().substr(0, m_compositionCaretOffset + m_romajiBuffer.size())).size();
-            m_inputHistory.insert(offset, keys);
+            m_inputHistory = RomajiFromKana(DraftText().substr(0, m_compositionCaretOffset));
+            m_inputHistory += m_romajiBuffer;
+            m_inputHistory += keys;
+            m_inputHistory += RomajiFromKana(DraftText().substr(m_compositionCaretOffset));
         } else {
             if (m_inputHistoryReading != PreeditText()) m_inputHistory = RomajiFromKana(PreeditText());
             m_inputHistory += keys;
@@ -1403,6 +1411,10 @@ private:
         m_layer2PendingActive = false;
         const std::filesystem::path configPath = ResolveInstallPath(L"config/ime_settings.json");
         m_providerSettings = ime::config::LoadProviderSettings(configPath, &m_providerLoadError);
+        m_warframeDictionary = {};
+        if (m_providerSettings.warframe_dictionary_enabled) {
+            m_warframeDictionary.Load(configPath.parent_path() / L"warframe_dictionary.tsv");
+        }
         ConfigureDebugLoggingFromConfig();
         if (!m_providerLoadError.empty()) {
             DebugLog(m_providerLoadError.c_str());
@@ -2802,9 +2814,10 @@ private:
     }
     uint64_t QueueTranslationAsync(const std::wstring& reading, const std::wstring& context) {
         const std::wstring trimmed = TrimWhitespace(reading);
+        const std::wstring source = m_warframeDictionary.Normalize(trimmed);
         TranslationLlmSettings llmSettings = BuildTranslationLlmSettings();
-        auto job = [this, trimmed, context, llmSettings](uint64_t id, const AsyncWorkQueue::CancelFlag& cancelFlag) {
-            TranslationResult result = ExecuteTranslationJob(id, trimmed, context, cancelFlag, llmSettings);
+        auto job = [this, source, context, llmSettings](uint64_t id, const AsyncWorkQueue::CancelFlag& cancelFlag) {
+            TranslationResult result = ExecuteTranslationJob(id, source, context, cancelFlag, llmSettings);
             PostMainThreadCallback([this, res = std::move(result)]() mutable {
                 OnTranslationReady(std::move(res));
             });
@@ -2834,6 +2847,13 @@ private:
         }
         if (result.entries.size() > m_maxTranslationCandidatesPerEntry) {
             result.entries.resize(m_maxTranslationCandidatesPerEntry);
+        }
+        if (m_providerSettings.warframe_dictionary_enabled && key == m_candidateSourceKey) {
+            const auto source = m_warframeDictionary.Normalize(m_candidateSourceText);
+            for (auto& candidate : result.entries) {
+                candidate.displayText = m_warframeDictionary.RestoreEnglishSpelling(source, candidate.displayText);
+                candidate.commitText = m_warframeDictionary.RestoreEnglishSpelling(source, candidate.commitText);
+            }
         }
         if (!key.empty()) {
             TranslationCacheEntry entry;
@@ -2874,8 +2894,8 @@ private:
         }
         if (m_conversionProvider) {
             ime::conversion::LayerRequestContext ctx;
-            ctx.reading = trimmed;
-            ctx.committedText = trimmed;
+            ctx.reading = m_warframeDictionary.Normalize(trimmed);
+            ctx.committedText = ctx.reading;
             ctx.layer = 3;
             ctx.allowAsync = true;
             auto list = m_conversionProvider->FetchTranslation(ctx);
@@ -3802,6 +3822,26 @@ private:
             cands.push_back(trimmed);
         }
         ApplyLearnedCandidateOrdering(trimmed.empty() ? reading : trimmed, &cands);
+        if (!m_providerSettings.warframe_dictionary_enabled) return cands;
+        const auto terms = m_warframeDictionary.Find(trimmed);
+        if (!terms.empty()) {
+            for (const auto& term : terms) std::erase(cands, term);
+            cands.insert(cands.begin(), terms.begin(), terms.end());
+            if (captureSegments) m_layer1SourceSegments.clear();
+        } else {
+            std::vector<std::wstring> relatedTerms;
+            for (const auto& candidate : cands) {
+                for (const auto& term : m_warframeDictionary.Find(candidate)) {
+                    if (std::find(cands.begin(), cands.end(), term) == cands.end()) {
+                        AppendUniqueCandidate(relatedTerms, term);
+                    }
+                }
+            }
+            if (!relatedTerms.empty()) {
+                cands.insert(cands.end(), relatedTerms.begin(), relatedTerms.end());
+                if (captureSegments) m_layer1SourceSegments.clear();
+            }
+        }
         return cands;
     }
     static void AppendUniqueCandidate(std::vector<std::wstring>& list, std::wstring value) {

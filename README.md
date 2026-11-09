@@ -324,6 +324,21 @@ Start-Process regsvr32.exe -ArgumentList "`"$dll`"" -Wait
 ローカル実行に対応します。後者の設定手順とCPU／GPUの切り替え方法は
 [llama.cppでの翻訳](docs/operations/llama_cpp.md)を参照してください。
 
+### Warframe辞書
+
+「RTAS 設定」の「Warframe 辞書」で「変換と翻訳で使う」を選択し、保存します。
+「公式データを更新」は公式の英語版・日本語版を取得し、設定ファイルと同じフォルダに
+`warframe_dictionary.tsv` を保存します。更新には Windows の PATH にある Python 3.8 以降が必要です。
+ビルドが出力する `update_warframe_dictionary.py` は `RTASSettings.exe` と同じフォルダに置いてください。
+保存や更新の後にIMEを使用するアプリを開き直すと、新しい設定と辞書が読み込まれます。
+
+`くばりっち` を入力してSpaceを押すと `Kuva Lich` が候補に表示されます。
+英訳では、文中の日英対応が一意な辞書表記を英語名にそろえてから翻訳エンジンに渡します。
+翻訳結果に同じ語が出た場合は、公式英語名の大文字・小文字を復元します。
+公開データに読みがない名称は、公式の表示名で引けます。一部の推定読みは候補検索に使えます。
+Wikiで見つけた用語は、公式資料で日英表記を確認してから補完辞書へ加えます。
+辞書ファイルの先頭に取得元、追加・変更件数、日英が未照合の名称を記録します。
+
 配布元の設定ファイルは[`config/ime_settings.json`](config/ime_settings.json)です。
 Releaseビルドの実行時には`x64\Release\config\ime_settings.json`を読み込みます。
 
