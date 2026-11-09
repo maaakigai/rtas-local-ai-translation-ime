@@ -39,7 +39,6 @@ class OverlayController;
 class TextService;
 extern const CLSID CLSID_TsfIme;
 extern const GUID GUID_TsfImeProfile;
-extern const GUID GUID_LangBarButton;
 extern const GUID GUID_DA_PREEDIT;
 extern const GUID GUID_DA_LAYER2;
 extern const GUID GUID_DA_TRANSLATION;
@@ -111,6 +110,7 @@ public:
     STDMETHODIMP SetAttributeInfo(const TF_DISPLAYATTRIBUTE*) override { return E_NOTIMPL; }
     STDMETHODIMP Reset() override { return S_OK; }
 private:
+    ComModuleRef m_moduleRef;
     LONG _ref;
     GUID _guid;
     std::wstring _description;
@@ -181,6 +181,7 @@ public:
         return S_OK;
     }
 private:
+    ComModuleRef m_moduleRef;
     LONG _ref;
     size_t _index;
     std::vector<ITfDisplayAttributeInfo*> _infos;
@@ -202,11 +203,13 @@ public:
     STDMETHODIMP GetText(BSTR* pbstrText) override;
     STDMETHODIMP AdviseSink(REFIID riid, IUnknown* punk, DWORD* pdwCookie) override;
     STDMETHODIMP UnadviseSink(DWORD dwCookie) override;
+    void DetachOwner() { m_owner = nullptr; }
     void SetToggled(bool toggled);
     void SetDisplayText(const wchar_t* text);
 private:
     void NotifySink(DWORD dwFlags);
     bool EnsureResourceIcons();
+    ComModuleRef m_moduleRef;
     LONG m_ref = 1;
     TextService* m_owner = nullptr;
     ITfLangBarItemSink* m_sink = nullptr;
@@ -307,8 +310,10 @@ public:
         return S_OK;
     }
     STDMETHODIMP Deactivate() override {
+        ++m_activationGeneration;
         ShutdownCompartmentMonitoring();
         UnregisterLangBarButton();
+        CloseCandidateUI();
         if (m_ptm) {
             ComPtr<ITfKeystrokeMgr> km;
             if (SUCCEEDED(m_ptm->QueryInterface(IID_PPV_ARGS(&km)))) {
@@ -328,8 +333,6 @@ public:
         }
         HideOverlay();
         DestroyOverlay();
-        CancelActiveTranslationRequest();
-        CancelActiveLayer2Request();
         StopOllamaResidencyOnDeactivate();
         m_translationCache.clear();
         m_layer2Cache.clear();
@@ -891,7 +894,9 @@ public:
     STDMETHODIMP EnumDisplayAttributeInfo(IEnumTfDisplayAttributeInfo** ppEnum) override;
     STDMETHODIMP GetDisplayAttributeInfo(REFGUID guid, ITfDisplayAttributeInfo** ppInfo) override;
 private:
+    ComModuleRef m_moduleRef;
     template<class T> struct ComPtr { T* p = nullptr; ~ComPtr() { if (p) p->Release(); } T** operator&() { return &p; } operator bool()const { return p != nullptr; } T* operator->()const { return p; } };
+    uint64_t m_activationGeneration = 0;
     TextService() : m_ref(1), m_ptm(nullptr), m_tid(TF_CLIENTID_NULL) {}
     ~TextService() = default;
     // Kana toggle state and romaji buffer
@@ -1123,15 +1128,19 @@ private:
         }
         if (!ctx) return;
         struct CaptureCaretAnchorEditSession final : ITfEditSession {
+            ComModuleRef m_moduleRef;
             LONG _ref{ 1 };
             ITfContext* _ctx{ nullptr };
-            TextService* _owner{ nullptr };
+            TextService* _owner;
+            uint64_t _generation;
             CaptureCaretAnchorEditSession(ITfContext* ctx, TextService* owner)
-                : _ctx(ctx), _owner(owner) {
+                : _ctx(ctx), _owner(owner), _generation(owner->m_activationGeneration) {
                 if (_ctx) _ctx->AddRef();
+                _owner->AddRef();
             }
             ~CaptureCaretAnchorEditSession() {
                 if (_ctx) _ctx->Release();
+                _owner->Release();
             }
             STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
                 if (!ppv) return E_POINTER;
@@ -1150,7 +1159,7 @@ private:
                 return r;
             }
             STDMETHODIMP DoEditSession(TfEditCookie ec) override {
-                if (!_ctx || !_owner) return S_OK;
+                if (!_ctx || !_owner || _owner->m_activationGeneration != _generation) return S_OK;
                 TF_SELECTION sel{};
                 ULONG fetched = 0;
                 if (SUCCEEDED(_ctx->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &sel, &fetched)) &&
@@ -1848,7 +1857,6 @@ private:
         }
     }
 // --- Async dispatch window -----------------------------------------------
-    static ATOM s_asyncDispatchClass;
     static constexpr UINT WM_ASYNC_DISPATCH = WM_APP + 0x200;
     static LRESULT CALLBACK AsyncDispatchWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         TextService* self = reinterpret_cast<TextService*>(GetWindowLongPtrW(hwnd, GWLP_USERDATA));
@@ -1867,20 +1875,18 @@ private:
         }
         return DefWindowProcW(hwnd, msg, wParam, lParam);
     }
-    static void RegisterAsyncDispatchClass() {
-        if (s_asyncDispatchClass) return;
+    static bool RegisterAsyncDispatchClass() {
         WNDCLASSW wc{};
         wc.lpfnWndProc = AsyncDispatchWndProc;
         wc.hInstance = g_hModule;
-        wc.lpszClassName = L"TSF_AsyncDispatch";
-        s_asyncDispatchClass = RegisterClassW(&wc);
+        wc.lpszClassName = kAsyncDispatchClass;
+        return RegisterClassW(&wc) || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
     }
     bool EnsureAsyncDispatchWindow() {
         if (m_hwndAsyncDispatch) return true;
-        RegisterAsyncDispatchClass();
-        if (!s_asyncDispatchClass) return false;
+        if (!RegisterAsyncDispatchClass()) return false;
         m_hwndAsyncDispatch = CreateWindowExW(
-            0, L"TSF_AsyncDispatch", L"", 0,
+            0, kAsyncDispatchClass, L"", 0,
             0, 0, 0, 0,
             HWND_MESSAGE, nullptr, g_hModule, this);
         return m_hwndAsyncDispatch != nullptr;
@@ -2037,6 +2043,7 @@ private:
     TranslationLlmSettings BuildTranslationLlmSettings() const {
         return TranslationLlmSettings(m_providerSettings.translation.llm);
     }
+    static void QueueOllamaResidencyWork(std::function<void()> run);
     void StartOllamaResidencyOnActivate() {
         if (m_ollamaResidencyActive) {
             return;
@@ -2058,11 +2065,7 @@ private:
             return;
         }
         const uint64_t generation = m_ollamaResidencyGeneration;
-        std::thread([llmSettings, generation]() {
-            struct ModuleRef {
-                ModuleRef() { InterlockedIncrement(&g_cDllRef); }
-                ~ModuleRef() { InterlockedDecrement(&g_cDllRef); }
-            } moduleRef;
+        QueueOllamaResidencyWork([llmSettings, generation]() {
             const OllamaResidencyState residency = TextService::ReadOllamaResidencyState();
             if (residency.generation != generation || residency.activeCount <= 0) {
                 DebugLog(L"Ollama residency warmup cancelled: RTAS deactivated");
@@ -2082,7 +2085,7 @@ private:
             std::wstring message = L"Ollama residency warmup complete for model=";
             message += result.model;
             DebugLog(message.c_str());
-        }).detach();
+        });
     }
     void StopOllamaResidencyOnDeactivate() {
         if (!m_ollamaResidencyActive) {
@@ -2105,11 +2108,7 @@ private:
         }
         const uint64_t generation = m_ollamaResidencyGeneration;
         const int delayMs = std::max(0, llmSettings.unloadDelayMs);
-        std::thread([llmSettings, generation, delayMs]() {
-            struct ModuleRef {
-                ModuleRef() { InterlockedIncrement(&g_cDllRef); }
-                ~ModuleRef() { InterlockedDecrement(&g_cDllRef); }
-            } moduleRef;
+        QueueOllamaResidencyWork([llmSettings, generation, delayMs]() {
             if (delayMs > 0) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(delayMs));
             }
@@ -2128,7 +2127,7 @@ private:
             std::wstring message = L"Ollama residency unload complete for model=";
             message += result.model;
             DebugLog(message.c_str());
-        }).detach();
+        });
     }
     static std::wstring CandidateDisplayText(const llm::CandidateEntry& entry) {
         if (!entry.displayText.empty()) return entry.displayText;
@@ -3052,7 +3051,10 @@ private:
         const std::wstring lockedPrefixSnapshot = keepCarry ? m_layer2LockedPrefix : std::wstring();
         CancelActiveTranslationRequest();
         CancelActiveLayer2Request();
-        if (m_candidateUI) { m_candidateUI->End(); m_candidateUI->Release(); m_candidateUI = nullptr; }
+        if (auto* candidate = std::exchange(m_candidateUI, nullptr)) {
+            candidate->End();
+            candidate->Release();
+        }
         if (m_candidateContext) { m_candidateContext->Release(); m_candidateContext = nullptr; }
         m_candidatePreview.clear();
         m_candidateReading.clear();
@@ -3425,14 +3427,24 @@ private:
     }
     // --- Composition helpers -------------------------------------------------
     struct StartCompositionEditSession : public ITfEditSession {
-        LONG _ref{1}; ITfContext* _ctx{ nullptr }; TfClientId _tid{ TF_CLIENTID_NULL }; TextService* _owner{ nullptr };
-        StartCompositionEditSession(ITfContext* c, TfClientId t, TextService* o) : _ctx(c), _tid(t), _owner(o) { if (_ctx) _ctx->AddRef(); }
-        ~StartCompositionEditSession() { if (_ctx) _ctx->Release(); }
+        ComModuleRef m_moduleRef;
+        LONG _ref{1};
+        ITfContext* _ctx;
+        TextService* _owner;
+        uint64_t _generation;
+        StartCompositionEditSession(ITfContext* c, TextService* o) : _ctx(c), _owner(o), _generation(o->m_activationGeneration) {
+            if (_ctx) _ctx->AddRef();
+            if (_owner) _owner->AddRef();
+        }
+        ~StartCompositionEditSession() {
+            if (_ctx) _ctx->Release();
+            if (_owner) _owner->Release();
+        }
         STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override { if (!ppv) return E_POINTER; *ppv = nullptr; if (riid == IID_IUnknown || riid == __uuidof(ITfEditSession)) { *ppv = static_cast<ITfEditSession*>(this); AddRef(); return S_OK; } return E_NOINTERFACE; }
         STDMETHODIMP_(ULONG) AddRef() override { return (ULONG)InterlockedIncrement(&_ref); }
         STDMETHODIMP_(ULONG) Release() override { ULONG r = (ULONG)InterlockedDecrement(&_ref); if (!r) delete this; return r; }
         STDMETHODIMP DoEditSession(TfEditCookie ec) override {
-            if (!_ctx || !_owner) return S_OK;
+            if (!_ctx || !_owner || _owner->m_activationGeneration != _generation) return S_OK;
             DebugLog(L"StartComposition DoEditSession");
             TF_SELECTION sel{}; ULONG fetched=0; if (FAILED(_ctx->GetSelection(ec, TF_DEFAULT_SELECTION, 1, &sel, &fetched)) || fetched!=1 || !sel.range) return S_OK;
             ComPtr<ITfContextComposition> ccc; if (FAILED(_ctx->QueryInterface(IID_PPV_ARGS(&ccc)))) { if (sel.range) sel.range->Release(); return S_OK; }
@@ -3457,14 +3469,25 @@ private:
         }
     };
     struct UpdateCompositionEditSession : public ITfEditSession {
-        LONG _ref{1}; ITfContext* _ctx{ nullptr }; TfClientId _tid{ TF_CLIENTID_NULL }; TextService* _owner{ nullptr }; std::wstring _text;
-        UpdateCompositionEditSession(ITfContext* c, TfClientId t, TextService* o, const std::wstring& s) : _ctx(c), _tid(t), _owner(o), _text(s) { if (_ctx) _ctx->AddRef(); }
-        ~UpdateCompositionEditSession() { if (_ctx) _ctx->Release(); }
+        ComModuleRef m_moduleRef;
+        LONG _ref{1};
+        ITfContext* _ctx;
+        TextService* _owner;
+        uint64_t _generation;
+        std::wstring _text;
+        UpdateCompositionEditSession(ITfContext* c, TextService* o, const std::wstring& s) : _ctx(c), _owner(o), _generation(o->m_activationGeneration), _text(s) {
+            if (_ctx) _ctx->AddRef();
+            if (_owner) _owner->AddRef();
+        }
+        ~UpdateCompositionEditSession() {
+            if (_ctx) _ctx->Release();
+            if (_owner) _owner->Release();
+        }
         STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override { if (!ppv) return E_POINTER; *ppv = nullptr; if (riid == IID_IUnknown || riid == __uuidof(ITfEditSession)) { *ppv = static_cast<ITfEditSession*>(this); AddRef(); return S_OK; } return E_NOINTERFACE; }
         STDMETHODIMP_(ULONG) AddRef() override { return (ULONG)InterlockedIncrement(&_ref); }
         STDMETHODIMP_(ULONG) Release() override { ULONG r = (ULONG)InterlockedDecrement(&_ref); if (!r) delete this; return r; }
         STDMETHODIMP DoEditSession(TfEditCookie ec) override {
-            if (!_ctx || !_owner) return S_OK;
+            if (!_ctx || !_owner || _owner->m_activationGeneration != _generation) return S_OK;
             if (!_owner->m_composition) { DebugLog(L"UpdateComposition DoEditSession without composition"); return S_OK; }
             DebugLog(L"UpdateComposition DoEditSession");
             ComPtr<ITfRange> rng; _owner->m_composition->GetRange(&rng.p); if (!rng.p) return S_OK;
@@ -3475,14 +3498,25 @@ private:
         }
     };
     struct EndCompositionEditSession : public ITfEditSession {
-        LONG _ref{1}; ITfContext* _ctx{ nullptr }; TfClientId _tid{ TF_CLIENTID_NULL }; TextService* _owner{ nullptr }; std::wstring _commit;
-        EndCompositionEditSession(ITfContext* c, TfClientId t, TextService* o, const std::wstring& s) : _ctx(c), _tid(t), _owner(o), _commit(s) { if (_ctx) _ctx->AddRef(); }
-        ~EndCompositionEditSession() { if (_ctx) _ctx->Release(); }
+        ComModuleRef m_moduleRef;
+        LONG _ref{1};
+        ITfContext* _ctx;
+        TextService* _owner;
+        uint64_t _generation;
+        std::wstring _commit;
+        EndCompositionEditSession(ITfContext* c, TextService* o, const std::wstring& s) : _ctx(c), _owner(o), _generation(o->m_activationGeneration), _commit(s) {
+            if (_ctx) _ctx->AddRef();
+            if (_owner) _owner->AddRef();
+        }
+        ~EndCompositionEditSession() {
+            if (_ctx) _ctx->Release();
+            if (_owner) _owner->Release();
+        }
         STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override { if (!ppv) return E_POINTER; *ppv = nullptr; if (riid == IID_IUnknown || riid == __uuidof(ITfEditSession)) { *ppv = static_cast<ITfEditSession*>(this); AddRef(); return S_OK; } return E_NOINTERFACE; }
         STDMETHODIMP_(ULONG) AddRef() override { return (ULONG)InterlockedIncrement(&_ref); }
         STDMETHODIMP_(ULONG) Release() override { ULONG r = (ULONG)InterlockedDecrement(&_ref); if (!r) delete this; return r; }
         STDMETHODIMP DoEditSession(TfEditCookie ec) override {
-            if (!_ctx || !_owner) return S_OK;
+            if (!_ctx || !_owner || _owner->m_activationGeneration != _generation) return S_OK;
             DebugLog(L"EndComposition DoEditSession");
             if (_owner->m_composition) {
                 ComPtr<ITfRange> rng; _owner->m_composition->GetRange(&rng.p);
@@ -3529,7 +3563,7 @@ private:
             }
         }
         if (!ctx) return;
-        auto* edit = new (std::nothrow) StartCompositionEditSession(ctx, m_tid, this);
+        auto* edit = new (std::nothrow) StartCompositionEditSession(ctx, this);
         if (!edit) return;
         HRESULT hrSession = E_FAIL;
         HRESULT hr = ctx->RequestEditSession(m_tid, edit, TF_ES_SYNC | TF_ES_READWRITE, &hrSession);
@@ -3549,7 +3583,7 @@ private:
             ComPtr<ITfDocumentMgr> dm; if (SUCCEEDED(m_ptm->GetFocus(&dm.p)) && dm.p) { dm->GetTop(&focused.p); ctx = focused.p; }
         }
         if (!ctx) return;
-        auto* edit = new (std::nothrow) UpdateCompositionEditSession(ctx, m_tid, this, text);
+        auto* edit = new (std::nothrow) UpdateCompositionEditSession(ctx, this, text);
         if (!edit) return;
         HRESULT hrSession = E_FAIL;
         HRESULT hr = ctx->RequestEditSession(m_tid, edit, TF_ES_SYNC | TF_ES_READWRITE, &hrSession);
@@ -3580,7 +3614,7 @@ private:
             ResetForceHalfWidthInput();
             return;
         }
-        auto* edit = new (std::nothrow) EndCompositionEditSession(ctx, m_tid, this, commit);
+        auto* edit = new (std::nothrow) EndCompositionEditSession(ctx, this, commit);
         if (!edit) return;
         HRESULT hrSession = E_FAIL;
         HRESULT hr = ctx->RequestEditSession(m_tid, edit, TF_ES_SYNC | TF_ES_READWRITE, &hrSession);
@@ -3910,12 +3944,21 @@ private:
     }
     // Edit session to insert text at caret
     struct InsertTextEditSession : public ITfEditSession {
+        ComModuleRef m_moduleRef;
         LONG _ref{1};
         ITfContext* _context{ nullptr };
-        TfClientId _tid{ TF_CLIENTID_NULL };
+        TextService* _owner;
+        uint64_t _generation;
         std::wstring _text;
-        InsertTextEditSession(ITfContext* ctx, TfClientId tid, const std::wstring& txt) : _context(ctx), _tid(tid), _text(txt) { if (_context) _context->AddRef(); }
-        ~InsertTextEditSession() { if (_context) _context->Release(); }
+        InsertTextEditSession(ITfContext* ctx, TextService* owner, const std::wstring& txt)
+            : _context(ctx), _owner(owner), _generation(owner->m_activationGeneration), _text(txt) {
+            if (_context) _context->AddRef();
+            _owner->AddRef();
+        }
+        ~InsertTextEditSession() {
+            if (_context) _context->Release();
+            _owner->Release();
+        }
         STDMETHODIMP QueryInterface(REFIID riid, void** ppv) override {
             if (!ppv) return E_POINTER; *ppv = nullptr;
             if (riid == IID_IUnknown || riid == __uuidof(ITfEditSession)) { *ppv = static_cast<ITfEditSession*>(this); AddRef(); return S_OK; }
@@ -3924,7 +3967,7 @@ private:
         STDMETHODIMP_(ULONG) AddRef() override { return (ULONG)InterlockedIncrement(&_ref); }
         STDMETHODIMP_(ULONG) Release() override { ULONG r = (ULONG)InterlockedDecrement(&_ref); if (!r) delete this; return r; }
         STDMETHODIMP DoEditSession(TfEditCookie ec) override {
-            if (!_context || _text.empty()) return S_OK;
+            if (!_context || _text.empty() || _owner->m_activationGeneration != _generation) return S_OK;
             DebugLog(L"InsertText DoEditSession begin");
             // Try InsertAtSelection first
             ComPtr<ITfInsertAtSelection> insert;
@@ -3951,7 +3994,7 @@ private:
     };
     bool InsertText(ITfContext* context, const std::wstring& text) {
         if (!context || text.empty()) return false;
-        auto* edit = new (std::nothrow) InsertTextEditSession(context, m_tid, text);
+        auto* edit = new (std::nothrow) InsertTextEditSession(context, this, text);
         if (!edit) return false;
         HRESULT hrSession = E_FAIL;
         HRESULT hr = context->RequestEditSession(m_tid, edit, TF_ES_SYNC | TF_ES_READWRITE, &hrSession);

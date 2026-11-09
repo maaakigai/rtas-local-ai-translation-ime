@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "rtas_globals.h"
+
 class TextService;
 
 class OverlayController {
@@ -25,7 +27,7 @@ private:
     void ResetToAuto();
 
     static LRESULT CALLBACK OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
-    static void RegisterOverlayClass();
+    static bool RegisterOverlayClass();
 
     TextService* m_owner;
     HWND m_hwnd = nullptr;
@@ -36,7 +38,6 @@ private:
     bool m_hasLastAnchorPos = false;
 
     static const UINT kOverlayToastTimerId = 1;
-    static ATOM s_overlayClass;
 };
 
 class CandidateUI final : public ITfCandidateListUIElementBehavior {
@@ -87,9 +88,10 @@ private:
     void RepositionCandidateWindow(int width, int height);
     void PaintCandidateWindow(HDC hdc);
     void RefreshCandidateWindowMetrics();
-    static void RegisterCandidateWindowClass();
+    static bool RegisterCandidateWindowClass();
     static LRESULT CALLBACK CandidateWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam);
 
+    ComModuleRef m_moduleRef;
     LONG m_ref = 1;
     TextService* m_owner = nullptr;
     ITfUIElementMgr* m_mgr = nullptr;
@@ -106,5 +108,4 @@ private:
     POINT m_lastAnchorPos{ 0, 0 };
     bool m_hasLastAnchorPos = false;
 
-    static ATOM s_candidateClass;
 };

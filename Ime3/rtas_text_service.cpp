@@ -1,25 +1,11 @@
 ﻿#define _WIN32_WINNT 0x0601
 
 #include "rtas_text_service.h"
+#include <ctffunc.h>
 #include <strsafe.h>
 #include "..\resource_ids.h"
 #include "../src/config/open_settings.h"
 
-#ifndef TF_LBI_ATTR_STATUS
-#define TF_LBI_ATTR_STATUS 0x00000001u
-#endif
-#ifndef TF_LBI_ATTR_TEXTCOLORICON
-#define TF_LBI_ATTR_TEXTCOLORICON 0x00000002u
-#endif
-#ifndef TF_LBI_STATUS
-#define TF_LBI_STATUS 0x00000001u
-#endif
-#ifndef TF_LBI_ICON
-#define TF_LBI_ICON 0x00000002u
-#endif
-#ifndef TF_LBI_STYLE_TEXTCOLORICON
-#define TF_LBI_STYLE_TEXTCOLORICON 0x00000010u
-#endif
 #ifndef CONNECT_E_ADVISELIMIT
 #define CONNECT_E_ADVISELIMIT ((HRESULT)0x80040201L)
 #endif
@@ -32,9 +18,6 @@ const CLSID CLSID_TsfIme =
 
 const GUID GUID_TsfImeProfile =
 { 0xa878c4e2, 0x6c78, 0x4a94, {0x81, 0x32, 0xc0, 0xd5, 0xb4, 0x33, 0xf2, 0x6f} };
-
-const GUID GUID_LangBarButton =
-{ 0x36c54a2d, 0x408d, 0x4d35, {0x9a, 0x8f, 0x2e, 0x49, 0x13, 0xd5, 0x64, 0x2f} };
 
 const GUID GUID_DA_PREEDIT =
 { 0x8e294c6e, 0x39f9, 0x4d52, {0x9c, 0x52, 0x74, 0xb9, 0xd6, 0xb4, 0x69, 0x2b} };
@@ -72,6 +55,41 @@ const std::array<PreservedKeyDef, 11> kPreservedKeyDefs = { {
     { &kShiftDbcs, VK_DBE_DBCSCHAR, L"Toggle kana-kanji-only mode", TF_MOD_SHIFT }
 } };
 
+
+namespace {
+struct OllamaResidencyWork {
+    ComModuleRef moduleRef;
+    std::function<void()> run;
+    HMODULE module;
+};
+
+void CALLBACK RunOllamaResidencyWork(PTP_CALLBACK_INSTANCE callback, void* context) {
+    std::unique_ptr<OllamaResidencyWork> work(static_cast<OllamaResidencyWork*>(context));
+    FreeLibraryWhenCallbackReturns(callback, work->module);
+    CallbackMayRunLong(callback);
+    try {
+        work->run();
+    } catch (...) {
+        DebugLog(L"Ollama residency task failed unexpectedly");
+    }
+}
+}
+
+void TextService::QueueOllamaResidencyWork(std::function<void()> run) {
+    HMODULE module = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS,
+            reinterpret_cast<LPCWSTR>(&g_hModule), &module)) {
+        DebugLog(L"Ollama residency could not retain the RTAS DLL", HRESULT_FROM_WIN32(GetLastError()));
+        return;
+    }
+    auto* work = new (std::nothrow) OllamaResidencyWork{{}, std::move(run), module};
+    if (work && TrySubmitThreadpoolCallback(RunOllamaResidencyWork, work, nullptr)) return;
+
+    const HRESULT hr = work ? HRESULT_FROM_WIN32(GetLastError()) : E_OUTOFMEMORY;
+    delete work;
+    FreeLibrary(module);
+    DebugLog(L"Ollama residency could not queue background work", hr);
+}
 
 LangBarButton::LangBarButton(TextService* owner) : m_owner(owner), m_text(kImeDisplayName) {}
 
@@ -139,7 +157,7 @@ STDMETHODIMP LangBarButton::GetInfo(TF_LANGBARITEMINFO* pInfo) {
     if (!pInfo) return E_POINTER;
     ZeroMemory(pInfo, sizeof(*pInfo));
     pInfo->clsidService = CLSID_TsfIme;
-    pInfo->guidItem = GUID_LangBarButton;
+    pInfo->guidItem = GUID_LBI_INPUTMODE;
     pInfo->dwStyle = TF_LBI_STYLE_BTN_BUTTON | TF_LBI_STYLE_BTN_TOGGLE |
                      TF_LBI_STYLE_SHOWNINTRAY | TF_LBI_STYLE_TEXTCOLORICON;
     pInfo->ulSort = 0;
@@ -162,7 +180,7 @@ STDMETHODIMP LangBarButton::Show(BOOL fShow) {
     }
     if (newStatus != m_status) {
         m_status = newStatus;
-        NotifySink(TF_LBI_STATUS | TF_LBI_ICON | TF_LBI_ATTR_STATUS | TF_LBI_ATTR_TEXTCOLORICON);
+        NotifySink(TF_LBI_STATUS | TF_LBI_ICON);
     }
     return S_OK;
 }
@@ -210,8 +228,8 @@ STDMETHODIMP LangBarButton::GetIcon(HICON* phIcon) {
         icon = on ? m_iconOn : m_iconOff;
         if (!icon) icon = m_iconOn ? m_iconOn : m_iconOff;
     }
-    *phIcon = icon;
-    return icon ? S_OK : S_FALSE;
+    *phIcon = icon ? CopyIcon(icon) : nullptr;
+    return *phIcon ? S_OK : E_FAIL;
 }
 
 void LangBarButton::SetDisplayText(const wchar_t* text) {
@@ -221,7 +239,7 @@ void LangBarButton::SetDisplayText(const wchar_t* text) {
     }
     if (m_text != newText) {
         m_text = newText;
-        NotifySink(TF_LBI_ICON | TF_LBI_ATTR_TEXTCOLORICON);
+        NotifySink(TF_LBI_TEXT);
     }
 }
 
@@ -240,7 +258,7 @@ STDMETHODIMP LangBarButton::AdviseSink(REFIID riid, IUnknown* punk, DWORD* pdwCo
     if (FAILED(hr)) return hr;
     m_sinkCookie = 1;
     *pdwCookie = m_sinkCookie;
-    NotifySink(TF_LBI_STATUS | TF_LBI_ICON | TF_LBI_ATTR_STATUS | TF_LBI_ATTR_TEXTCOLORICON);
+    NotifySink(TF_LBI_STATUS | TF_LBI_ICON);
     return S_OK;
 }
 
@@ -259,7 +277,7 @@ void LangBarButton::SetToggled(bool toggled) {
                               : (m_status & ~TF_LBI_STATUS_BTN_TOGGLED);
     if (newStatus != m_status) {
         m_status = newStatus;
-        NotifySink(TF_LBI_STATUS | TF_LBI_ICON | TF_LBI_ATTR_STATUS | TF_LBI_ATTR_TEXTCOLORICON);
+        NotifySink(TF_LBI_STATUS | TF_LBI_ICON);
     }
 }
 
@@ -276,6 +294,8 @@ void TextService::RegisterLangBarButton() {
         mgr->Release();
         return;
     }
+    button->SetToggled(m_kanaMode);
+    button->SetDisplayText(m_kanaMode ? L"\u3042" : L"A");
     HRESULT hr = mgr->AddItem(button);
     if (SUCCEEDED(hr)) {
         if (m_langBarMgr.p) {
@@ -284,9 +304,6 @@ void TextService::RegisterLangBarButton() {
         m_langBarMgr.p = mgr;
         m_langBarButton = button;
         m_langBarButton->AddRef();
-        m_langBarButton->SetToggled(m_kanaMode);
-        // Use explicit code point to avoid source-encoding issues.
-        m_langBarButton->SetDisplayText(m_kanaMode ? L"\u3042" : L"A");
         button->Release();
         return;
     }
@@ -295,11 +312,9 @@ void TextService::RegisterLangBarButton() {
 }
 
 void TextService::UnregisterLangBarButton() {
-    if (m_langBarMgr.p && m_langBarButton) {
-        m_langBarMgr.p->RemoveItem(m_langBarButton);
-        m_langBarButton->Release();
-        m_langBarButton = nullptr;
-    } else if (m_langBarButton) {
+    if (m_langBarButton) {
+        m_langBarButton->DetachOwner();
+        if (m_langBarMgr.p) m_langBarMgr.p->RemoveItem(m_langBarButton);
         m_langBarButton->Release();
         m_langBarButton = nullptr;
     }
@@ -316,7 +331,6 @@ void TextService::UpdateLangBarButtonToggle() {
     }
 }
 
-ATOM TextService::s_asyncDispatchClass = 0;
 STDMETHODIMP TextService::EnumDisplayAttributeInfo(IEnumTfDisplayAttributeInfo** ppEnum) {
     if (!ppEnum) return E_POINTER;
     *ppEnum = nullptr;

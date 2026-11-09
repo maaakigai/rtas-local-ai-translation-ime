@@ -10,7 +10,27 @@
 #include "..\resource_ids.h"
 
 HMODULE g_hModule = nullptr;
-long g_cDllRef = 0;
+namespace {
+SRWLOCK g_moduleLock = SRWLOCK_INIT;
+LONG g_moduleRefs = 0;
+}
+
+void ComModuleRef::Acquire() {
+    AcquireSRWLockExclusive(&g_moduleLock);
+    ++g_moduleRefs;
+    ReleaseSRWLockExclusive(&g_moduleLock);
+}
+
+void ComModuleRef::Release() {
+    AcquireSRWLockExclusive(&g_moduleLock);
+    if (--g_moduleRefs == 0) {
+        // Window classes registered by a DLL survive unloading unless removed.
+        UnregisterClassW(kOverlayClass, g_hModule);
+        UnregisterClassW(kCandidateClass, g_hModule);
+        UnregisterClassW(kAsyncDispatchClass, g_hModule);
+    }
+    ReleaseSRWLockExclusive(&g_moduleLock);
+}
 
 extern "C" BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
@@ -21,7 +41,10 @@ extern "C" BOOL WINAPI DllMain(HINSTANCE hinst, DWORD reason, LPVOID) {
 }
 
 extern "C" STDAPI DllCanUnloadNow() {
-    return (g_cDllRef == 0) ? S_OK : S_FALSE;
+    AcquireSRWLockShared(&g_moduleLock);
+    const HRESULT result = g_moduleRefs == 0 ? S_OK : S_FALSE;
+    ReleaseSRWLockShared(&g_moduleLock);
+    return result;
 }
 
 extern "C" STDAPI DllGetClassObject(REFCLSID rclsid, REFIID riid, void** ppv) {

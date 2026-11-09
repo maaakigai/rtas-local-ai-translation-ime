@@ -38,7 +38,6 @@ STDMETHODIMP ClassFactory::CreateInstance(IUnknown* punkOuter, REFIID riid, void
     *ppvObject = nullptr;
     if (punkOuter) return CLASS_E_NOAGGREGATION;
 
-    ComModuleRef moduleRef;
     auto* service = new (std::nothrow) TextService();
     if (!service) return E_OUTOFMEMORY;
     HRESULT hr = service->QueryInterface(riid, ppvObject);
@@ -48,10 +47,10 @@ STDMETHODIMP ClassFactory::CreateInstance(IUnknown* punkOuter, REFIID riid, void
 
 STDMETHODIMP ClassFactory::LockServer(BOOL fLock) {
     if (fLock) {
-        InterlockedIncrement(&g_cDllRef);
+        ComModuleRef::Acquire();
     }
     else {
-        InterlockedDecrement(&g_cDllRef);
+        ComModuleRef::Release();
     }
     return S_OK;
 }

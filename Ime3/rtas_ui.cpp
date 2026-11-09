@@ -44,9 +44,6 @@ std::wstring CompactCandidateForDisplay(const std::wstring& text, const std::wst
 }
 }  // namespace
 
-ATOM OverlayController::s_overlayClass = 0;
-ATOM CandidateUI::s_candidateClass = 0;
-
 OverlayController::OverlayController(TextService* owner)
     : m_owner(owner) {}
 
@@ -54,15 +51,14 @@ OverlayController::~OverlayController() {
     Destroy();
 }
 
-void OverlayController::RegisterOverlayClass() {
-    if (s_overlayClass) return;
+bool OverlayController::RegisterOverlayClass() {
     WNDCLASSW wc{};
     wc.style = CS_DROPSHADOW;
     wc.lpfnWndProc = OverlayWndProc;
     wc.hInstance = g_hModule;
-    wc.lpszClassName = L"TSF_PreeditOverlay";
+    wc.lpszClassName = kOverlayClass;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-    s_overlayClass = RegisterClassW(&wc);
+    return RegisterClassW(&wc) || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
 }
 
 LRESULT CALLBACK OverlayController::OverlayWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -117,11 +113,10 @@ LRESULT CALLBACK OverlayController::OverlayWndProc(HWND hwnd, UINT msg, WPARAM w
 
 bool OverlayController::EnsureOverlayWindow() {
     if (m_hwnd) return true;
-    RegisterOverlayClass();
-    if (!s_overlayClass) return false;
+    if (!RegisterOverlayClass()) return false;
     m_hwnd = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT,
-        L"TSF_PreeditOverlay", L"", WS_POPUP,
+        kOverlayClass, L"", WS_POPUP,
         CW_USEDEFAULT, CW_USEDEFAULT, 1, 1,
         nullptr, nullptr, g_hModule, this);
     if (!m_hwnd) return false;
@@ -403,6 +398,7 @@ STDMETHODIMP CandidateUI::GetGUID(GUID* pguid) {
 }
 
 STDMETHODIMP CandidateUI::Show(BOOL fShow) {
+    if (!m_owner) return S_FALSE;
     m_shown = !!fShow;
     UpdateCandidateWindow();
     return S_OK;
@@ -475,6 +471,7 @@ STDMETHODIMP CandidateUI::GetCurrentPage(UINT* puPage) {
 }
 
 STDMETHODIMP CandidateUI::SetSelection(UINT nIndex) {
+    if (!m_owner) return S_FALSE;
     if (nIndex >= m_candidates.size()) return E_INVALIDARG;
     m_selection = static_cast<int>(nIndex);
     if (m_owner) m_owner->OnCandidateSelectionChanged(SelectedString());
@@ -503,6 +500,8 @@ bool CandidateUI::Begin() {
 }
 
 void CandidateUI::End() {
+    m_owner = nullptr;
+    m_shown = FALSE;
     HideCandidateWindow();
     if (m_mgr && m_id != static_cast<DWORD>(-1)) m_mgr->EndUIElement(m_id);
     m_id = static_cast<DWORD>(-1);
@@ -579,15 +578,14 @@ const std::wstring& CandidateUI::SelectedString() const {
     return m_candidates.empty() ? kEmpty : m_candidates[static_cast<size_t>(m_selection)];
 }
 
-void CandidateUI::RegisterCandidateWindowClass() {
-    if (s_candidateClass) return;
+bool CandidateUI::RegisterCandidateWindowClass() {
     WNDCLASSW wc{};
     wc.lpfnWndProc = CandidateWndProc;
     wc.hInstance = g_hModule;
-    wc.lpszClassName = L"RTAS_CandidatePopup";
+    wc.lpszClassName = kCandidateClass;
     wc.hCursor = LoadCursorW(nullptr, IDC_ARROW);
     wc.hbrBackground = nullptr;
-    s_candidateClass = RegisterClassW(&wc);
+    return RegisterClassW(&wc) || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
 }
 
 LRESULT CALLBACK CandidateUI::CandidateWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
@@ -619,11 +617,10 @@ LRESULT CALLBACK CandidateUI::CandidateWndProc(HWND hwnd, UINT msg, WPARAM wPara
 
 bool CandidateUI::EnsureCandidateWindow() {
     if (m_hwnd) return true;
-    RegisterCandidateWindowClass();
-    if (!s_candidateClass) return false;
+    if (!RegisterCandidateWindowClass()) return false;
     m_hwnd = CreateWindowExW(
         WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
-        L"RTAS_CandidatePopup",
+        kCandidateClass,
         L"",
         WS_POPUP,
         CW_USEDEFAULT, CW_USEDEFAULT, 1, 1,

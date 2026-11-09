@@ -6,10 +6,6 @@
 #include "rtas_globals.h"
 #include "rtas_text_service.h"
 
-struct ComModuleRef {
-    ComModuleRef() { InterlockedIncrement(&g_cDllRef); }
-    ~ComModuleRef() { InterlockedDecrement(&g_cDllRef); }
-};
 
 class ClassFactory final : public IClassFactory {
 public:
@@ -26,5 +22,6 @@ public:
 
 private:
     ClassFactory() = default;
+    ComModuleRef m_moduleRef;
     LONG m_ref{ 1 };
 };
