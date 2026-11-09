@@ -3,6 +3,7 @@
 #include "rtas_text_service.h"
 #include <strsafe.h>
 #include "..\resource_ids.h"
+#include "../src/config/open_settings.h"
 
 #ifndef TF_LBI_ATTR_STATUS
 #define TF_LBI_ATTR_STATUS 0x00000001u
@@ -167,7 +168,17 @@ STDMETHODIMP LangBarButton::GetTooltipString(BSTR* pbstrToolTip) {
     return *pbstrToolTip ? S_OK : E_OUTOFMEMORY;
 }
 
-STDMETHODIMP LangBarButton::OnClick(TfLBIClick click, POINT, const RECT*) {
+STDMETHODIMP LangBarButton::OnClick(TfLBIClick click, POINT point, const RECT*) {
+    if (click == TF_LBI_CLK_RIGHT) {
+        HMENU menu = CreatePopupMenu();
+        if (!menu) return E_OUTOFMEMORY;
+        AppendMenuW(menu, MF_STRING, 1, L"RTAS 設定…");
+        const UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_NONOTIFY | TPM_RIGHTBUTTON,
+            point.x, point.y, 0, GetForegroundWindow(), nullptr);
+        DestroyMenu(menu);
+        if (command == 1) OpenRtasSettings(nullptr, g_hModule);
+        return S_OK;
+    }
     if (click != TF_LBI_CLK_LEFT || !m_owner) {
         return S_OK;
     }
@@ -175,11 +186,14 @@ STDMETHODIMP LangBarButton::OnClick(TfLBIClick click, POINT, const RECT*) {
     return S_OK;
 }
 
-STDMETHODIMP LangBarButton::InitMenu(ITfMenu*) {
-    return S_OK;
+STDMETHODIMP LangBarButton::InitMenu(ITfMenu* menu) {
+    if (!menu) return E_POINTER;
+    const wchar_t label[] = L"RTAS 設定…";
+    return menu->AddMenuItem(1, 0, nullptr, nullptr, label, ARRAYSIZE(label) - 1, nullptr);
 }
 
-STDMETHODIMP LangBarButton::OnMenuSelect(UINT) {
+STDMETHODIMP LangBarButton::OnMenuSelect(UINT id) {
+    if (id == 1) OpenRtasSettings(nullptr, g_hModule);
     return S_OK;
 }
 

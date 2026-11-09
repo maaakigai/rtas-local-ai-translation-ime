@@ -18,6 +18,20 @@ enum class TranslationMode {
   kDictionary,
 };
 
+enum class LlmBackend {
+  kOllama,
+  kLlamaCpp,
+};
+
+enum class LlmPromptFormat {
+  kAuto,
+  kChat,
+  kPlamo2,
+  kPlamo3,
+};
+
+enum class LlmDevice { kGpu, kCpu };
+
 struct LlmSettings {
   std::string model;
   std::string host = "127.0.0.1";
@@ -31,6 +45,10 @@ struct LlmSettings {
   bool unload_on_deactivate = true;
   int unload_delay_ms = 10000;
   bool log_timings = true;
+  LlmBackend backend = LlmBackend::kOllama;
+  LlmPromptFormat prompt_format = LlmPromptFormat::kAuto;
+  LlmDevice device = LlmDevice::kGpu;
+  std::string local_runtime_root;
 };
 
 struct DictionarySettings {

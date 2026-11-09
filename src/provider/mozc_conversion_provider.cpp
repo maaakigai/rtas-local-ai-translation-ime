@@ -190,20 +190,7 @@ MozcConversionProvider::MozcConversionProvider(
     const ime::config::MozcSettings& settings,
     const ime::config::LlmSettings& llmSettings)
     : settings_(settings), transport_(CreateMozcTransport(settings)) {
-  llmSettings_.model = Utf8ToWide(llmSettings.model);
-  llmSettings_.host = Utf8ToWide(llmSettings.host);
-  llmSettings_.port = llmSettings.port > 0
-                          ? static_cast<uint16_t>(llmSettings.port)
-                          : static_cast<uint16_t>(11434);
-  llmSettings_.path = Utf8ToWide(llmSettings.path);
-  llmSettings_.useTls = llmSettings.use_tls;
-  llmSettings_.timeoutMs = llmSettings.timeout_ms;
-  llmSettings_.keepAlive = Utf8ToWide(llmSettings.keep_alive);
-  llmSettings_.warmupOnActivate = llmSettings.warmup_on_activate;
-  llmSettings_.warmupTimeoutMs = llmSettings.warmup_timeout_ms;
-  llmSettings_.unloadOnDeactivate = llmSettings.unload_on_deactivate;
-  llmSettings_.unloadDelayMs = llmSettings.unload_delay_ms;
-  llmSettings_.logTimings = llmSettings.log_timings;
+  llmSettings_ = TranslationLlmSettings(llmSettings);
 }
 
 MozcConversionProvider::~MozcConversionProvider() {

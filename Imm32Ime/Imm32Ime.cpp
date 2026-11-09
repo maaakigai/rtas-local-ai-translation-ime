@@ -1,3 +1,4 @@
+#include "../src/config/open_settings.h"
 #include <windows.h>
 #include <imm.h>
 #include <cwctype>
@@ -287,7 +288,7 @@ extern "C" BOOL WINAPI NotifyIME(HIMC hIMC, DWORD, DWORD, DWORD) {
 }
 extern "C" BOOL WINAPI ImeDestroy(UINT) { g_states.clear(); return TRUE; }
 extern "C" BOOL WINAPI ImeEscape(HIMC, UINT, LPVOID) { return FALSE; }
-extern "C" BOOL WINAPI ImeConfigure(HKL, HWND, DWORD, LPVOID) { return FALSE; }
+extern "C" BOOL WINAPI ImeConfigure(HKL, HWND owner, DWORD, LPVOID) { return OpenRtasSettings(owner, g_hInst); }
 extern "C" BOOL WINAPI ImeConversionList(HIMC, LPCTSTR, LPCANDIDATELIST, DWORD, UINT) { return FALSE; }
 static HICON CreateTextIcon(const wchar_t* text) {
     const int size = 16;

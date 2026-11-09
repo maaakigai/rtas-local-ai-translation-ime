@@ -12,6 +12,8 @@
 #include <thread>
 #include <utility>
 
+#include "../src/config/provider_settings.h"
+
 class AsyncWorkQueue {
 public:
     using CancelFlag = std::shared_ptr<std::atomic_bool>;
@@ -55,6 +57,9 @@ struct TranslationResult {
 };
 
 struct TranslationLlmSettings {
+    TranslationLlmSettings() = default;
+    explicit TranslationLlmSettings(const ime::config::LlmSettings& settings);
+
     std::wstring model = L"default";
     std::wstring host = L"127.0.0.1";
     uint16_t port = 11434;
@@ -67,6 +72,8 @@ struct TranslationLlmSettings {
     bool unloadOnDeactivate = true;
     int unloadDelayMs = 10000;
     bool logTimings = true;
+    ime::config::LlmBackend backend = ime::config::LlmBackend::kOllama;
+    ime::config::LlmPromptFormat promptFormat = ime::config::LlmPromptFormat::kAuto;
 };
 
 struct OllamaLifecycleResult {

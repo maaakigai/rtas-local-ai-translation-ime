@@ -4,6 +4,7 @@
 #include <fstream>
 #include <optional>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <utility>
 
@@ -182,6 +183,32 @@ DictionarySettings ParseDictionary(const nlohmann::json& node,
 
 LlmSettings ParseLlm(const nlohmann::json& node, const LlmSettings& defaults) {
   LlmSettings llm = defaults;
+  if (auto device = node.find("device"); device != node.end()) {
+    if (*device == "cpu") llm.device = LlmDevice::kCpu;
+    else if (*device == "gpu") llm.device = LlmDevice::kGpu;
+    else throw std::invalid_argument("LLM device must be 'cpu' or 'gpu'.");
+  }
+  if (auto root = node.find("local_runtime_root"); root != node.end() && root->is_string()) {
+    llm.local_runtime_root = root->get<std::string>();
+  }
+  if (auto format = node.find("prompt_format"); format != node.end()) {
+    if (*format == "auto") llm.prompt_format = LlmPromptFormat::kAuto;
+    else if (*format == "chat") llm.prompt_format = LlmPromptFormat::kChat;
+    else if (*format == "plamo2") llm.prompt_format = LlmPromptFormat::kPlamo2;
+    else if (*format == "plamo3") llm.prompt_format = LlmPromptFormat::kPlamo3;
+    else throw std::invalid_argument("Unknown LLM prompt_format.");
+  }
+  if (auto backend_it = node.find("backend"); backend_it != node.end()) {
+    if (*backend_it == "llama_cpp") {
+      llm.backend = LlmBackend::kLlamaCpp;
+      llm.port = 8080;
+      llm.path = "/v1/chat/completions";
+    } else if (*backend_it == "ollama") {
+      llm.backend = LlmBackend::kOllama;
+    } else {
+      throw std::invalid_argument("LLM backend must be 'ollama' or 'llama_cpp'.");
+    }
+  }
   if (auto model_it = node.find("model");
       model_it != node.end() && model_it->is_string()) {
     llm.model = *model_it;

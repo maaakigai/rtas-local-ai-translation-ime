@@ -31,20 +31,7 @@ std::wstring TrimWhitespace(const std::wstring& input) {
 }  // namespace
 
 Imm32ConversionProvider::Imm32ConversionProvider(const ime::config::ProviderSettings& settings) {
-    llmSettings_.model = Utf8ToWide(settings.translation.llm.model);
-    llmSettings_.host = Utf8ToWide(settings.translation.llm.host);
-    llmSettings_.port = settings.translation.llm.port > 0
-                            ? static_cast<uint16_t>(settings.translation.llm.port)
-                            : static_cast<uint16_t>(11434);
-    llmSettings_.path = Utf8ToWide(settings.translation.llm.path);
-    llmSettings_.useTls = settings.translation.llm.use_tls;
-    llmSettings_.timeoutMs = settings.translation.llm.timeout_ms;
-    llmSettings_.keepAlive = Utf8ToWide(settings.translation.llm.keep_alive);
-    llmSettings_.warmupOnActivate = settings.translation.llm.warmup_on_activate;
-    llmSettings_.warmupTimeoutMs = settings.translation.llm.warmup_timeout_ms;
-    llmSettings_.unloadOnDeactivate = settings.translation.llm.unload_on_deactivate;
-    llmSettings_.unloadDelayMs = settings.translation.llm.unload_delay_ms;
-    llmSettings_.logTimings = settings.translation.llm.log_timings;
+    llmSettings_ = TranslationLlmSettings(settings.translation.llm);
 }
 
 Imm32ConversionProvider::~Imm32ConversionProvider() {

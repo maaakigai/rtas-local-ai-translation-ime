@@ -1,0 +1,18 @@
+#pragma once
+
+#define IDD_SETTINGS 101
+#define IDC_BACKEND 1001
+#define IDC_MODEL 1002
+#define IDC_HOST 1003
+#define IDC_PORT 1004
+#define IDC_PATH 1005
+#define IDC_TIMEOUT 1006
+#define IDC_TLS 1007
+#define IDC_KANA_ONLY 1008
+#define IDC_BROWSE 1009
+#define IDC_STATUS 1010
+#define IDC_CONFIG_PATH 1011
+#define IDC_RELOAD 1012
+#define IDC_FETCH_MODELS 1013
+#define IDC_PROMPT_FORMAT 1014
+#define IDC_DEVICE 1015

@@ -2070,23 +2070,7 @@ private:
         return settings.translation.mode == ime::config::TranslationMode::kLLM;
     }
     TranslationLlmSettings BuildTranslationLlmSettings() const {
-        TranslationLlmSettings llmSettings;
-        const auto& configured = m_providerSettings.translation.llm;
-        llmSettings.model = Utf8ToWide(configured.model);
-        llmSettings.host = Utf8ToWide(configured.host);
-        llmSettings.port = configured.port > 0
-            ? static_cast<uint16_t>(configured.port)
-            : static_cast<uint16_t>(11434);
-        llmSettings.path = Utf8ToWide(configured.path);
-        llmSettings.useTls = configured.use_tls;
-        llmSettings.timeoutMs = configured.timeout_ms;
-        llmSettings.keepAlive = Utf8ToWide(configured.keep_alive);
-        llmSettings.warmupOnActivate = configured.warmup_on_activate;
-        llmSettings.warmupTimeoutMs = configured.warmup_timeout_ms;
-        llmSettings.unloadOnDeactivate = configured.unload_on_deactivate;
-        llmSettings.unloadDelayMs = configured.unload_delay_ms;
-        llmSettings.logTimings = configured.log_timings;
-        return llmSettings;
+        return TranslationLlmSettings(m_providerSettings.translation.llm);
     }
     void StartOllamaResidencyOnActivate() {
         if (m_ollamaResidencyActive) {
@@ -2104,7 +2088,7 @@ private:
             return;
         }
         TranslationLlmSettings llmSettings = BuildTranslationLlmSettings();
-        if (!llmSettings.warmupOnActivate) {
+        if (llmSettings.backend != ime::config::LlmBackend::kOllama || !llmSettings.warmupOnActivate) {
             DebugLog(L"Ollama residency warmup disabled by config; LLM cold-start latency may increase");
             return;
         }
@@ -2150,7 +2134,7 @@ private:
             return;
         }
         TranslationLlmSettings llmSettings = BuildTranslationLlmSettings();
-        if (!llmSettings.unloadOnDeactivate) {
+        if (llmSettings.backend != ime::config::LlmBackend::kOllama || !llmSettings.unloadOnDeactivate) {
             DebugLog(L"Ollama residency unload disabled by config; model may remain resident");
             return;
         }

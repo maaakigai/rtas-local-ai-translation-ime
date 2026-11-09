@@ -318,6 +318,12 @@ Start-Process regsvr32.exe -ArgumentList "`"$dll`"" -Wait
 
 ## 設定
 
+ビルド出力の `RTASSettings.exe`、またはIMEの「A / あ」の右クリックメニューにある
+「RTAS 設定…」から、翻訳エンジンと接続先を編集できます。「一覧取得」で接続先の
+モデルを表示し、選択して保存します。OllamaでのPLaMo利用と、llama.cppでの
+ローカル実行に対応します。後者の設定手順とCPU／GPUの切り替え方法は
+[llama.cppでの翻訳](docs/operations/llama_cpp.md)を参照してください。
+
 配布元の設定ファイルは[`config/ime_settings.json`](config/ime_settings.json)です。
 Releaseビルドの実行時には`x64\Release\config\ime_settings.json`を読み込みます。
 
