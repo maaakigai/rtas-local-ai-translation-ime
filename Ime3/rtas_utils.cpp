@@ -11,16 +11,6 @@
 
 #include "rtas_globals.h"
 
-extern const GUID GUID_Preserved_Toggle;
-extern const GUID GUID_Preserved_KANA;
-extern const GUID GUID_Preserved_KANJI;
-extern const GUID GUID_Preserved_DBE_ALPHANUMERIC;
-extern const GUID GUID_Preserved_DBE_HIRAGANA;
-extern const GUID GUID_Preserved_DBE_KATAKANA;
-extern const GUID GUID_Preserved_DBE_SBCSCHAR;
-extern const GUID GUID_Preserved_DBE_DBCSCHAR;
-extern const GUID GUID_Preserved_DBE_ROMAN;
-
 namespace {
 
 struct WarframeTerm {
@@ -550,40 +540,32 @@ std::wstring FormatWinHttpError(DWORD errorCode) {
     return TrimWhitespace(result);
 }
 
-KanaModeCommand ClassifyKanaKey(UINT vkey, UINT toggleVk) {
-    if (vkey == toggleVk || vkey == VK_KANA || vkey == VK_KANJI) {
-        return KanaModeCommand::Toggle;
+KanaModeCommand ClassifyKanaKey(UINT vkey, UINT toggleVk, bool shiftPressed) {
+    // Windows can report either width variant for the same Japanese key.
+    if (vkey == toggleVk || vkey == VK_KANA || vkey == VK_KANJI ||
+        vkey == VK_DBE_SBCSCHAR || vkey == VK_DBE_DBCSCHAR) {
+        return shiftPressed ? KanaModeCommand::ToggleKanaKanjiOnly : KanaModeCommand::Toggle;
     }
     switch (vkey) {
     case VK_DBE_HIRAGANA:
     case VK_DBE_KATAKANA:
         return KanaModeCommand::ForceOn;
     case VK_DBE_ALPHANUMERIC:
-    case VK_DBE_SBCSCHAR:
     case VK_DBE_ROMAN:
         return KanaModeCommand::ForceOff;
-    case VK_DBE_DBCSCHAR:
-        return (toggleVk == VK_DBE_DBCSCHAR) ? KanaModeCommand::Toggle : KanaModeCommand::ForceOn;
     default:
         return KanaModeCommand::None;
     }
 }
 
-KanaModeCommand CommandFromPreservedGuid(REFGUID guid, UINT toggleVk) {
-    // Preserved key GUIDs mirror those registered by the text service.
-    if (IsEqualGUID(guid, GUID_Preserved_Toggle) || IsEqualGUID(guid, GUID_Preserved_KANA) || IsEqualGUID(guid, GUID_Preserved_KANJI)) {
-        return KanaModeCommand::Toggle;
-    }
-    if (IsEqualGUID(guid, GUID_Preserved_DBE_HIRAGANA) || IsEqualGUID(guid, GUID_Preserved_DBE_KATAKANA)) {
-        return KanaModeCommand::ForceOn;
-    }
-    if (IsEqualGUID(guid, GUID_Preserved_DBE_DBCSCHAR)) {
-        return (toggleVk == VK_DBE_DBCSCHAR) ? KanaModeCommand::Toggle : KanaModeCommand::ForceOn;
-    }
-    if (IsEqualGUID(guid, GUID_Preserved_DBE_ALPHANUMERIC) || IsEqualGUID(guid, GUID_Preserved_DBE_SBCSCHAR) || IsEqualGUID(guid, GUID_Preserved_DBE_ROMAN)) {
-        return KanaModeCommand::ForceOff;
-    }
-    return KanaModeCommand::None;
+bool KanaModeKeyDispatch::Accept(KanaModeCommand command, LONG messageTime, bool preserved) {
+    // A single key can arrive via both TSF callbacks, with different Shift states.
+    if (command == KanaModeCommand::ToggleKanaKanjiOnly) command = KanaModeCommand::Toggle;
+    if (lastCommand_ == command && lastTime_ == messageTime && lastPreserved_ != preserved) return false;
+    lastCommand_ = command;
+    lastTime_ = messageTime;
+    lastPreserved_ = preserved;
+    return true;
 }
 
 const wchar_t* MapFullWidthSymbol(UINT vkey, bool shiftPressed) {

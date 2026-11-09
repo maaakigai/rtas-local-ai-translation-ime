@@ -35,6 +35,23 @@ bool RunCandidateStateTests() {
     expect(NormalizeImeShortcut('L', MOD_WIN, true) == 0, "Windows shortcuts pass through");
     expect(NormalizeImeShortcut(VK_OEM_3, MOD_ALT, false) == VK_KANJI, "US keyboard Alt+backtick toggles IME");
     expect(NormalizeImeShortcut(VK_CAPITAL, MOD_CONTROL, false) == VK_DBE_HIRAGANA, "Ctrl+CapsLock enables Japanese input");
+    for (UINT key : {VK_DBE_SBCSCHAR, VK_DBE_DBCSCHAR}) {
+        expect(ClassifyKanaKey(key, VK_DBE_DBCSCHAR) == KanaModeCommand::Toggle,
+               "both Japanese width key codes toggle Japanese and Latin input");
+        expect(ClassifyKanaKey(key, VK_DBE_DBCSCHAR, true) == KanaModeCommand::ToggleKanaKanjiOnly,
+               "Shift with either width key code toggles translation mode");
+    }
+    expect(ClassifyKanaKey(VK_DBE_ALPHANUMERIC, VK_DBE_DBCSCHAR) == KanaModeCommand::ForceOff &&
+           ClassifyKanaKey(VK_DBE_HIRAGANA, VK_DBE_DBCSCHAR) == KanaModeCommand::ForceOn,
+           "dedicated alphabet and hiragana keys retain explicit mode selection");
+    KanaModeKeyDispatch modeKeys;
+    expect(modeKeys.Accept(KanaModeCommand::ToggleKanaKanjiOnly, 100, false) &&
+           !modeKeys.Accept(KanaModeCommand::Toggle, 100, true),
+           "preserved callback with a changed Shift state does not switch modes again");
+    expect(modeKeys.Accept(KanaModeCommand::Toggle, 101, true) &&
+           !modeKeys.Accept(KanaModeCommand::Toggle, 101, false) &&
+           modeKeys.Accept(KanaModeCommand::Toggle, 102, false),
+           "preserved-first delivery switches once and a new press is accepted");
     expect(ConvertCharacterForm(L"ｶﾞギＡ", VK_F6) == L"がぎＡ", "F6 handles half-width voiced kana");
     expect(ConvertCharacterForm(L"がぎぐ", VK_F7) == L"ガギグ", "F7 converts to katakana");
     expect(ConvertCharacterForm(L"ぱぴぷ", VK_F8) == L"ﾊﾟﾋﾟﾌﾟ", "F8 handles expanding voiced kana");

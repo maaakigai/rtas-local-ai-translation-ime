@@ -14,7 +14,18 @@ enum class KanaModeCommand {
     None,
     Toggle,
     ForceOn,
-    ForceOff
+    ForceOff,
+    ToggleKanaKanjiOnly
+};
+
+class KanaModeKeyDispatch {
+public:
+    bool Accept(KanaModeCommand command, LONG messageTime, bool preserved);
+
+private:
+    KanaModeCommand lastCommand_ = KanaModeCommand::None;
+    LONG lastTime_ = 0;
+    bool lastPreserved_ = false;
 };
 
 void ConfigureDebugLogFile(const std::filesystem::path& path,
@@ -49,8 +60,7 @@ private:
     std::map<wchar_t, std::vector<size_t>> lengths_;
 };
 std::wstring FormatWinHttpError(DWORD errorCode);
-KanaModeCommand ClassifyKanaKey(UINT vkey, UINT toggleVk);
-KanaModeCommand CommandFromPreservedGuid(REFGUID guid, UINT toggleVk);
+KanaModeCommand ClassifyKanaKey(UINT vkey, UINT toggleVk, bool shiftPressed = false);
 const wchar_t* MapFullWidthSymbol(UINT vkey, bool shiftPressed);
 const wchar_t* MapHalfWidthSymbol(UINT vkey, bool shiftPressed);
 UINT GetImeKeyModifiers();

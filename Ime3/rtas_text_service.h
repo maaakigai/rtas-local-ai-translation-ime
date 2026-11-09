@@ -61,8 +61,9 @@ struct PreservedKeyDef {
     const GUID* guid;
     UINT vkey;
     const wchar_t* label;
+    UINT modifiers = 0;
 };
-extern const std::array<PreservedKeyDef, 9> kPreservedKeyDefs;
+extern const std::array<PreservedKeyDef, 11> kPreservedKeyDefs;
 class DisplayAttributeInfo final : public ITfDisplayAttributeInfo {
 public:
     DisplayAttributeInfo(const GUID& guid, std::wstring description, COLORREF lineColor, TF_DA_LINESTYLE style)
@@ -282,7 +283,7 @@ public:
                 }
                 TF_PRESERVEDKEY pk{};
                 pk.uVKey = def.vkey;
-                pk.uModifiers = 0;
+                pk.uModifiers = def.modifiers;
                 km->PreserveKey(m_tid, *def.guid, &pk, def.label, (ULONG)lstrlenW(def.label));
             }
         }
@@ -319,7 +320,7 @@ public:
                     }
                     TF_PRESERVEDKEY pk{};
                     pk.uVKey = def.vkey;
-                    pk.uModifiers = 0;
+                    pk.uModifiers = def.modifiers;
                     km->UnpreserveKey(*def.guid, &pk);
                 }
             }
@@ -351,13 +352,10 @@ public:
         const bool hasInput = !PreeditText().empty() || m_candidateUI;
         const UINT key = NormalizeImeShortcut(static_cast<UINT>(wParam), modifiers, hasInput);
         if (!key) { *eaten = FALSE; return S_OK; }
-        if (shiftPressed && (key == kToggleVk || key == VK_KANA || key == VK_KANJI)) {
+        if (ClassifyKanaKey(key, kToggleVk, shiftPressed) != KanaModeCommand::None) {
             *eaten = TRUE;
             return S_OK;
         }
-        // Treat only main toggle keys as preserved by us
-        KanaModeCommand cmd = ClassifyKanaKey(key, kToggleVk);
-        if (cmd != KanaModeCommand::None) { *eaten = TRUE; return S_OK; }
         const bool hasPreeditText = !PreeditText().empty();
         const bool hasUi = (m_candidateUI != nullptr);
         const bool hasActiveInput = hasPreeditText || hasUi;
@@ -395,36 +393,17 @@ public:
         *eaten = FALSE; return S_OK;
     }
     STDMETHODIMP OnTestKeyUp(ITfContext*, WPARAM, LPARAM, BOOL* eaten) override { if (eaten) *eaten = FALSE; return S_OK; }
-    STDMETHODIMP OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM, BOOL* eaten) override {
+    STDMETHODIMP OnKeyDown(ITfContext* context, WPARAM wParam, LPARAM lParam, BOOL* eaten) override {
         if (eaten) *eaten = FALSE;
         const UINT modifiers = GetImeKeyModifiers();
         const bool shiftPressed = (modifiers & MOD_SHIFT) != 0;
         const UINT key = NormalizeImeShortcut(static_cast<UINT>(wParam), modifiers, !PreeditText().empty() || m_candidateUI);
         if (!key) return S_OK;
         wParam = key;
-        if (shiftPressed && (key == kToggleVk || key == VK_KANA || key == VK_KANJI)) {
-            AppendModeToastDebugLog(
-                L"OnKeyDown shift-toggle vkey=" + std::to_wstring(key) +
-                L" ctx=0x" + std::to_wstring(reinterpret_cast<uintptr_t>(context)));
-            ToggleKanaKanjiOnlyMode(context);
-            // Preserve-key callbacks may arrive after Shift is released.
-            // Mark this key so the companion preserved event is ignored once.
-            m_suppressPreservedKanaHandling = true;
-            m_suppressedKanaVKey = key;
-            if (eaten) *eaten = TRUE;
-            return S_OK;
-        }
-        // Handle toggle keys
-        KanaModeCommand cmd = ClassifyKanaKey(key, kToggleVk);
-        if (cmd != KanaModeCommand::None) {
-            AppendModeToastDebugLog(
-                L"OnKeyDown kana-key vkey=" + std::to_wstring(key) +
-                L" cmd=" + std::to_wstring(static_cast<int>(cmd)) +
-                L" ctx=0x" + std::to_wstring(reinterpret_cast<uintptr_t>(context)) +
-                L" (handled-on-keydown)");
-            ApplyKanaModeCommand(context, cmd, true, true);
-            m_suppressPreservedKanaHandling = true;
-            m_suppressedKanaVKey = key;
+        const auto command = ClassifyKanaKey(key, kToggleVk, shiftPressed);
+        if (command != KanaModeCommand::None) {
+            constexpr LPARAM wasDown = 1L << 30;
+            if (!(lParam & wasDown)) DispatchKanaModeKey(context, key, command, false);
             if (eaten) *eaten = TRUE;
             return S_OK;
         }
@@ -885,56 +864,19 @@ public:
         }
         return S_OK;
     }
-    STDMETHODIMP OnKeyUp(ITfContext*, WPARAM wParam, LPARAM, BOOL* eaten) override {
+    STDMETHODIMP OnKeyUp(ITfContext*, WPARAM, LPARAM, BOOL* eaten) override {
         if (eaten) *eaten = FALSE;
-        const UINT key = static_cast<UINT>(wParam);
-        if (m_suppressPreservedKanaHandling && key == m_suppressedKanaVKey) {
-            m_suppressPreservedKanaHandling = false;
-            m_suppressedKanaVKey = 0;
-        }
         return S_OK;
     }
     STDMETHODIMP OnPreservedKey(ITfContext* context, REFGUID rguid, BOOL* eaten) override {
         if (eaten) *eaten = FALSE;
-        AppendModeToastDebugLog(
-            L"OnPreservedKey guidData1=0x" + std::to_wstring(static_cast<unsigned long long>(rguid.Data1)) +
-            L" ctx=0x" + std::to_wstring(reinterpret_cast<uintptr_t>(context)));
-        const bool shiftPressed = (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
-        if (shiftPressed &&
-            (IsEqualGUID(rguid, GUID_Preserved_Toggle) ||
-             IsEqualGUID(rguid, GUID_Preserved_KANA) ||
-             IsEqualGUID(rguid, GUID_Preserved_KANJI))) {
-            // Shift+toggle is reserved for kana-kanji-only mode in OnKeyDown.
-            if (eaten) *eaten = TRUE;
-            return S_OK;
-        }
-        if (m_suppressPreservedKanaHandling) {
-            const bool stillPressed =
-                (m_suppressedKanaVKey != 0) &&
-                ((::GetKeyState(static_cast<int>(m_suppressedKanaVKey)) & 0x8000) != 0);
-            if (!stillPressed) {
-                // Key up may be missed in some hosts. Drop stale suppression.
-                m_suppressPreservedKanaHandling = false;
-                m_suppressedKanaVKey = 0;
-            } else {
-            AppendModeToastDebugLog(
-                L"OnPreservedKey suppressed after keydown guidData1=0x" +
-                std::to_wstring(static_cast<unsigned long long>(rguid.Data1)));
-            if (eaten) *eaten = TRUE;
-            return S_OK;
-            }
-        }
-        KanaModeCommand cmd = CommandFromPreservedGuid(rguid, kToggleVk);
-        if (cmd == KanaModeCommand::ForceOff && m_kanaMode == false) {
-            AppendModeToastDebugLog(L"OnPreservedKey ForceOff while already OFF");
-        } else if (cmd == KanaModeCommand::ForceOn && m_kanaMode == true) {
-            AppendModeToastDebugLog(L"OnPreservedKey ForceOn while already ON");
-        }
-        if (cmd != KanaModeCommand::None) {
-            // Fallback path when hosts do not send a usable OnKeyDown for preserved keys.
-            ApplyKanaModeCommand(context, cmd, true, true);
-            if (eaten) *eaten = TRUE;
-        }
+        const auto def = std::find_if(kPreservedKeyDefs.begin(), kPreservedKeyDefs.end(),
+            [&](const PreservedKeyDef& candidate) { return IsEqualGUID(rguid, *candidate.guid); });
+        if (def == kPreservedKeyDefs.end()) return S_OK;
+        const bool shiftPressed = (def->modifiers & TF_MOD_SHIFT) != 0 ||
+            (::GetKeyState(VK_SHIFT) & 0x8000) != 0;
+        DispatchKanaModeKey(context, def->vkey, ClassifyKanaKey(def->vkey, kToggleVk, shiftPressed), true);
+        if (eaten) *eaten = TRUE;
         return S_OK;
     }
     STDMETHODIMP OnChange(REFGUID rguid) override {
@@ -960,8 +902,7 @@ private:
     bool m_forceHalfWidthInput = false;
     size_t m_forceHalfWidthOutstanding = 0;
     bool m_kanaKanjiOnlyMode = false;
-    bool m_suppressPreservedKanaHandling = false;
-    UINT m_suppressedKanaVKey = 0;
+    KanaModeKeyDispatch m_kanaModeKeys;
     std::wstring m_romajiBuffer;
     std::wstring m_reading; // current preedit reading (hiragana)
     std::wstring m_inputHistory;
@@ -1361,6 +1302,18 @@ private:
         if (showToast && ShouldShowModeToast(context)) {
             RefreshCaretAnchorFromContext(context);
             ShowModeToast(m_kanaMode ? L"\u3042" : L"A");
+        }
+    }
+    void DispatchKanaModeKey(ITfContext* context, UINT key, KanaModeCommand command, bool preserved) {
+        if (!m_kanaModeKeys.Accept(command, GetMessageTime(), preserved)) return;
+        AppendModeToastDebugLog(
+            std::wstring(preserved ? L"OnPreservedKey" : L"OnKeyDown") +
+            L" kana-key vkey=" + std::to_wstring(key) +
+            L" cmd=" + std::to_wstring(static_cast<int>(command)));
+        if (command == KanaModeCommand::ToggleKanaKanjiOnly) {
+            ToggleKanaKanjiOnlyMode(context);
+        } else {
+            ApplyKanaModeCommand(context, command, true, true);
         }
     }
     void ApplyKanaModeCommand(ITfContext* context, KanaModeCommand cmd, bool showToast, bool updateCompartments) {

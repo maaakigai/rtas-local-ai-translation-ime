@@ -55,7 +55,10 @@ const WCHAR kImeDisplayName[] = L"RTAS";
 const LANGID kLangId = MAKELANGID(LANG_JAPANESE, SUBLANG_DEFAULT);
 const UINT kToggleVk = 0xF4;
 
-const std::array<PreservedKeyDef, 9> kPreservedKeyDefs = { {
+static const GUID kShiftSbcs = {0x8d989464, 0xf501, 0x4446, {0xb4, 0xd9, 0x08, 0xa0, 0xd2, 0xa0, 0xad, 0x46}};
+static const GUID kShiftDbcs = {0x683d66f7, 0xa2ab, 0x4602, {0x9e, 0x29, 0x11, 0x51, 0x81, 0xa9, 0xa1, 0xa7}};
+
+const std::array<PreservedKeyDef, 11> kPreservedKeyDefs = { {
     { &GUID_Preserved_Toggle, kToggleVk, L"Toggle" },
     { &GUID_Preserved_KANA, VK_KANA, L"KANA" },
     { &GUID_Preserved_KANJI, VK_KANJI, L"KANJI" },
@@ -64,7 +67,9 @@ const std::array<PreservedKeyDef, 9> kPreservedKeyDefs = { {
     { &GUID_Preserved_DBE_KATAKANA, VK_DBE_KATAKANA, L"KATAKANA" },
     { &GUID_Preserved_DBE_SBCSCHAR, VK_DBE_SBCSCHAR, L"SBCS" },
     { &GUID_Preserved_DBE_DBCSCHAR, VK_DBE_DBCSCHAR, L"DBCS" },
-    { &GUID_Preserved_DBE_ROMAN, VK_DBE_ROMAN, L"ROMAN" }
+    { &GUID_Preserved_DBE_ROMAN, VK_DBE_ROMAN, L"ROMAN" },
+    { &kShiftSbcs, VK_DBE_SBCSCHAR, L"Toggle kana-kanji-only mode", TF_MOD_SHIFT },
+    { &kShiftDbcs, VK_DBE_DBCSCHAR, L"Toggle kana-kanji-only mode", TF_MOD_SHIFT }
 } };
 
 
